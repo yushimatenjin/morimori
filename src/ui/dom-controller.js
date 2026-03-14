@@ -8,42 +8,55 @@ export class DomController {
       loadingText: document.querySelector('[data-component="LoadingText"]'),
       splash: document.querySelector('[data-component="SplashOverlay"]'),
       viewerRoot: document.querySelector('[data-component="ViewerRoot"]'),
+
       statusPill: document.querySelector('[data-component="StatusPill"]'),
       statusPillText: document.querySelector('[data-component="StatusPillText"]'),
       statusTitle: document.querySelector('[data-component="StatusTitle"]'),
       statusDetail: document.querySelector('[data-component="StatusDetail"]'),
-      searchInput: document.querySelector('[data-component="SearchInput"]'),
       searchStatus: document.querySelector('[data-component="SearchStatus"]'),
+
+      searchQuery: document.querySelector('[data-component="SearchQuery"]'),
+      centerMeta: document.querySelector('[data-component="CenterMeta"]'),
+
       width: document.querySelector('[data-component="WidthRange"]'),
       height: document.querySelector('[data-component="HeightRange"]'),
       widthValue: document.querySelector('[data-component="WidthValue"]'),
       heightValue: document.querySelector('[data-component="HeightValue"]'),
       totalArea: document.querySelector('[data-component="TotalArea"]'),
+      loadEstimate: document.querySelector('[data-component="LoadEstimate"]'),
+
       zoom: document.querySelector('[data-component="ZoomSelect"]'),
       heightScale: document.querySelector('[data-component="HeightScaleInput"]'),
-      texture: document.querySelector('[data-component="TextureToggle"]'),
+
+      cameraFov: document.querySelector('[data-component="CameraFov"]'),
+      timePreset: document.querySelector('[data-component="TimePreset"]'),
+      placementGuide: document.querySelector('[data-component="PlacementGuide"]'),
+      postGeneratePanel: document.querySelector('[data-component="PostGeneratePanel"]'),
+
       lockState: document.querySelector('[data-component="LockState"]'),
       lockButton: document.querySelector('[data-action="toggle-ratio-lock"]'),
-      summaryCenter: document.querySelector('[data-component="SummaryCenter"]'),
+
       summaryPlace: document.querySelector('[data-component="SummaryPlace"]'),
+      summaryCenter: document.querySelector('[data-component="SummaryCenter"]'),
       summaryArea: document.querySelector('[data-component="SummaryArea"]'),
       summaryResolution: document.querySelector('[data-component="SummaryResolution"]'),
+
       enterButton: document.querySelector('[data-action="enter-workspace"]'),
-      enterSampleButton: document.querySelector('[data-action="enter-with-sample"]'),
+      applySampleButton: document.querySelector('[data-action="apply-sample"]'),
       searchButton: document.querySelector('[data-action="search-location"]'),
+      quickLocationButtons: [...document.querySelectorAll('[data-action="quick-location"]')],
+      presetButtons: [...document.querySelectorAll('[data-action="apply-preset"]')],
+
       generateButton: document.querySelector('[data-action="generate-terrain"]'),
       exportButton: document.querySelector('[data-action="export-glb"]'),
       resetButton: document.querySelector('[data-action="reset-camera"]'),
-      presetButtons: [...document.querySelectorAll('[data-action="apply-preset"]')],
-      quickLocationButtons: [...document.querySelectorAll('[data-action="quick-location"]')]
+      applyViewpointButton: document.querySelector('[data-action="apply-viewpoint"]'),
+      showPlacementGuideButton: document.querySelector('[data-action="show-placement-guide"]')
     };
 
     this.runtime = {
       isLocked: true,
-      currentPlaceLabel: "富士山周辺",
-      hasGeneratedMesh: false,
-      lat: 35.3606,
-      lng: 138.7273
+      hasGeneratedMesh: false
     };
   }
 
@@ -51,21 +64,30 @@ export class DomController {
     return this.ui;
   }
 
-  getConfig() {
+  getTerrainConfig(runtime) {
     const heightScaleRaw = Number.parseFloat(this.ui.heightScale.value);
     return {
-      lat: this.runtime.lat,
-      lng: this.runtime.lng,
+      centerLat: runtime.center.lat,
+      centerLng: runtime.center.lng,
       widthKm: Number.parseFloat(this.ui.width.value),
       heightKm: Number.parseFloat(this.ui.height.value),
       zoom: Number.parseInt(this.ui.zoom.value, 10),
       heightScale: Number.isFinite(heightScaleRaw) && heightScaleRaw > 0 ? heightScaleRaw : 1,
-      useTexture: this.ui.texture.checked
+      useTexture: true
+    };
+  }
+
+  getPostConfig() {
+    const fov = Number.parseFloat(this.ui.cameraFov.value);
+    return {
+      fov: Number.isFinite(fov) ? fov : 55,
+      timePreset: this.ui.timePreset.value
     };
   }
 
   setPhase(phase) {
     const vm = phaseViewModel[phase] || phaseViewModel[AppPhase.IDLE];
+
     this.ui.body.dataset.state = phase;
     this.ui.statusPill.dataset.state = phase;
     this.ui.statusPillText.textContent = vm.pill;
@@ -90,35 +112,41 @@ export class DomController {
     this.ui.splash.setAttribute("aria-hidden", "true");
   }
 
-  updateLocation(lat, lng, label, query = "") {
-    this.runtime.lat = Number(lat);
-    this.runtime.lng = Number(lng);
-    this.runtime.currentPlaceLabel = label;
-
-    this.ui.summaryCenter.textContent = `${this.runtime.lat.toFixed(4)}, ${this.runtime.lng.toFixed(4)}`;
-    this.ui.summaryPlace.textContent = label;
-
-    if (query) {
-      this.ui.searchInput.value = query;
-    }
-
-    this.updateSummaryResolution();
+  setCenterSummary(runtime) {
+    this.ui.centerMeta.textContent = `中心: ${runtime.center.lat.toFixed(4)}, ${runtime.center.lng.toFixed(4)} (${runtime.center.label})`;
+    this.ui.summaryPlace.textContent = runtime.center.label;
+    this.ui.summaryCenter.textContent = `${runtime.center.lat.toFixed(4)}, ${runtime.center.lng.toFixed(4)}`;
   }
 
-  updateRangeLabels() {
+  updateSummaryArea(meshData = null) {
     const width = Number.parseFloat(this.ui.width.value);
     const height = Number.parseFloat(this.ui.height.value);
+    const zoom = this.ui.zoom.value;
+    const fov = this.ui.cameraFov.value;
+
     this.ui.widthValue.textContent = `${width.toFixed(1)} km`;
     this.ui.heightValue.textContent = `${height.toFixed(1)} km`;
     this.ui.totalArea.textContent = `${(width * height).toFixed(2)} km²`;
     this.ui.summaryArea.textContent = `${width.toFixed(1)} x ${height.toFixed(1)} km`;
+    this.ui.summaryResolution.textContent = meshData
+      ? `ズーム ${zoom} / ${meshData.width} x ${meshData.height} / FOV ${fov}`
+      : `ズーム ${zoom} / FOV ${fov}`;
+
+    this.ui.loadEstimate.textContent = this.formatLoadEstimate(width, height, Number.parseInt(zoom, 10));
   }
 
-  updateSummaryResolution(meshData = null) {
-    const zoom = this.ui.zoom.value;
-    this.ui.summaryResolution.textContent = meshData
-      ? `ズーム ${zoom} / ${meshData.width} x ${meshData.height}`
-      : `ズーム ${zoom}`;
+  formatLoadEstimate(width, height, zoom) {
+    const area = width * height;
+    const zoomFactor = Math.max(1, zoom - 8);
+    const score = (area * zoomFactor) / 220;
+
+    if (score < 1.2) {
+      return "推定負荷: 低 / 目安時間: 15秒";
+    }
+    if (score < 2.8) {
+      return "推定負荷: 中 / 目安時間: 40秒";
+    }
+    return "推定負荷: 高 / 目安時間: 90秒以上";
   }
 
   setPresetActive(type) {
@@ -140,12 +168,21 @@ export class DomController {
     this.ui.generateButton.disabled = isBusy;
     this.ui.exportButton.disabled = isBusy || !this.runtime.hasGeneratedMesh;
     this.ui.resetButton.disabled = isBusy || !this.runtime.hasGeneratedMesh;
+    this.ui.applyViewpointButton.disabled = isBusy || !this.runtime.hasGeneratedMesh;
+    this.ui.showPlacementGuideButton.disabled = isBusy || !this.runtime.hasGeneratedMesh;
   }
 
   setGeneratedAvailability(hasMesh) {
     this.runtime.hasGeneratedMesh = hasMesh;
     this.ui.exportButton.disabled = !hasMesh;
     this.ui.resetButton.disabled = !hasMesh;
+    this.ui.applyViewpointButton.disabled = !hasMesh;
+    this.ui.showPlacementGuideButton.disabled = !hasMesh;
+    this.ui.postGeneratePanel.classList.toggle("is-ready", hasMesh);
+  }
+
+  setPlacementGuide(text) {
+    this.ui.placementGuide.textContent = text;
   }
 
   get isLocked() {

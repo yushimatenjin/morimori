@@ -1,37 +1,38 @@
 .c-summary-card,
 .l-hint {
   border: 1px solid var(--line);
-  border-radius: 20px;
+  border-radius: 16px;
   background: rgba(0, 0, 0, 0.58);
   backdrop-filter: blur(14px);
 }
 
 .c-summary-card {
-  padding: 14px;
-  margin-bottom: 10px;
+  padding: 12px;
+  margin-bottom: 8px;
 }
 
 .c-summary-card span {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--muted);
 }
 
 .c-summary-card p {
-  margin: 8px 0 4px;
-  font-size: 20px;
+  margin: 7px 0 4px;
+  font-size: 16px;
   font-weight: 700;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
 }
 
 .c-summary-card small {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .l-hint p {
   margin: 0;
-  padding: 10px 14px;
-  font-size: 11px;
+  padding: 8px 12px;
+  font-size: 10px;
   color: var(--muted);
   font-family: var(--font-accent);
 }

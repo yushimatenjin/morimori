@@ -12,14 +12,14 @@
 .l-control-panel {
   position: absolute;
   z-index: 3;
-  top: 20px;
-  left: 20px;
-  width: min(430px, calc(100vw - 40px));
-  max-height: calc(100vh - 40px);
+  top: 14px;
+  left: 14px;
+  width: min(360px, calc(100vw - 28px));
+  max-height: calc(100vh - 28px);
   overflow: auto;
-  padding: 20px;
+  padding: 14px;
   border: 1px solid var(--line);
-  border-radius: 28px;
+  border-radius: 20px;
   background: var(--panel);
   backdrop-filter: blur(16px);
   box-shadow: var(--shadow);
@@ -36,15 +36,15 @@
 }
 
 .l-info-rail {
-  top: 20px;
-  right: 20px;
-  width: min(280px, calc(100vw - 40px));
+  top: 14px;
+  right: 14px;
+  width: min(300px, calc(100vw - 28px));
   transform: translateX(20px);
 }
 
 .l-hint {
-  right: 20px;
-  bottom: 20px;
+  right: 14px;
+  bottom: 14px;
   transform: translateY(20px);
 }
 
@@ -58,27 +58,30 @@ body[data-state="generated"] .l-hint {
 @media (max-width: 900px) {
   .l-control-panel {
     top: auto;
-    left: 12px;
-    right: 12px;
-    bottom: 12px;
+    left: 10px;
+    right: 10px;
+    bottom: 10px;
     width: auto;
-    max-height: min(70vh, 860px);
+    max-height: min(72vh, 840px);
+    border-radius: 18px;
   }
 
   .l-info-rail {
-    top: 12px;
-    right: 12px;
-    width: min(320px, calc(100vw - 24px));
+    top: 10px;
+    right: 10px;
+    width: min(330px, calc(100vw - 20px));
   }
 
   .l-hint {
-    left: 12px;
-    right: 12px;
-    bottom: calc(min(70vh, 860px) + 24px);
+    left: 10px;
+    right: 10px;
+    bottom: calc(min(72vh, 840px) + 20px);
   }
 }
 
 @media (max-width: 680px) {
-  .l-info-rail { display: none; }
-  .l-hint { display: none; }
+  .l-info-rail,
+  .l-hint {
+    display: none;
+  }
 }

@@ -3,6 +3,12 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { Sky } from "three/examples/jsm/objects/Sky.js";
 import { GeoUtils } from "../lib/geo-utils.js";
 
+const SKY_PRESETS = {
+  clear: { turbidity: 6, rayleigh: 2.1, mieCoefficient: 0.0035, mieDirectionalG: 0.78, elevation: 66, azimuth: 210 },
+  hazy: { turbidity: 12, rayleigh: 1.2, mieCoefficient: 0.009, mieDirectionalG: 0.82, elevation: 58, azimuth: 212 },
+  dramatic: { turbidity: 8, rayleigh: 0.9, mieCoefficient: 0.012, mieDirectionalG: 0.84, elevation: 40, azimuth: 238 }
+};
+
 export class TerrainViewer {
   constructor(container) {
     this.container = container;
@@ -30,6 +36,7 @@ export class TerrainViewer {
 
     this.currentMesh = null;
     this.frameState = null;
+    this.geoReference = null;
 
     this.initEnvironment();
     this.onResize();
@@ -38,22 +45,18 @@ export class TerrainViewer {
   }
 
   initEnvironment() {
-    const sky = new Sky();
-    sky.scale.setScalar(450000);
-    sky.material.uniforms.turbidity.value = 10;
-    sky.material.uniforms.rayleigh.value = 1.6;
-    sky.material.uniforms.mieCoefficient.value = 0.005;
-    sky.material.uniforms.mieDirectionalG.value = 0.78;
+    this.sky = new Sky();
+    this.sky.scale.setScalar(450000);
+    this.scene.add(this.sky);
 
-    const sun = new THREE.Vector3();
-    sun.setFromSphericalCoords(1, THREE.MathUtils.degToRad(74), THREE.MathUtils.degToRad(210));
-    sky.material.uniforms.sunPosition.value.copy(sun);
-    this.scene.add(sky);
+    this.sun = new THREE.Vector3();
 
     const hemi = new THREE.HemisphereLight(0xcfeeff, 0x0a1422, 1.15);
     const dir = new THREE.DirectionalLight(0xfff4df, 1.35);
     dir.position.set(15000, 22000, 9000);
     this.scene.add(hemi, dir);
+
+    this.applyAtmosphere({ skyPreset: "clear", timePreset: "day" });
   }
 
   disposeCurrentMesh() {
@@ -70,6 +73,23 @@ export class TerrainViewer {
 
     this.currentMesh.material.dispose();
     this.currentMesh = null;
+  }
+
+  applyAtmosphere({ skyPreset = "clear", timePreset = "day" }) {
+    const preset = SKY_PRESETS[skyPreset] || SKY_PRESETS.clear;
+    const timeShift = { morning: -14, day: 0, evening: -24 }[timePreset] ?? 0;
+
+    this.sky.material.uniforms.turbidity.value = preset.turbidity;
+    this.sky.material.uniforms.rayleigh.value = preset.rayleigh;
+    this.sky.material.uniforms.mieCoefficient.value = preset.mieCoefficient;
+    this.sky.material.uniforms.mieDirectionalG.value = preset.mieDirectionalG;
+
+    this.sun.setFromSphericalCoords(
+      1,
+      THREE.MathUtils.degToRad(Math.max(12, preset.elevation + timeShift)),
+      THREE.MathUtils.degToRad(preset.azimuth)
+    );
+    this.sky.material.uniforms.sunPosition.value.copy(this.sun);
   }
 
   update(data, config) {
@@ -117,7 +137,54 @@ export class TerrainViewer {
       heightSpan: Math.max(100, maxHeight - minHeight)
     };
 
+    this.geoReference = {
+      centerLat: config.centerLat,
+      centerLng: config.centerLng,
+      metersPerDegree: GeoUtils.getMetersPerDegree(config.centerLat)
+    };
+
     this.resetView();
+
+    return {
+      width: data.width,
+      height: data.height
+    };
+  }
+
+  toWorldPosition(lat, lng, altitude = 0) {
+    if (!this.geoReference) {
+      return new THREE.Vector3(0, altitude, 0);
+    }
+
+    const x = (lng - this.geoReference.centerLng) * this.geoReference.metersPerDegree.lon;
+    const z = (this.geoReference.centerLat - lat) * this.geoReference.metersPerDegree.lat;
+
+    return new THREE.Vector3(x, altitude, z);
+  }
+
+  applyViewpoint(viewpoint) {
+    if (!this.currentMesh || !this.geoReference) {
+      return;
+    }
+
+    const observerPos = this.toWorldPosition(viewpoint.observer.lat, viewpoint.observer.lng, viewpoint.observer.altitude);
+    const targetPos = this.toWorldPosition(viewpoint.target.lat, viewpoint.target.lng, viewpoint.target.altitude);
+
+    this.camera.fov = Math.min(120, Math.max(20, viewpoint.fov));
+    this.camera.updateProjectionMatrix();
+
+    this.camera.position.copy(observerPos);
+    this.controls.target.copy(targetPos);
+
+    // 方位が指定されている場合、現在位置を中心にわずかに回転して制作者の意図を反映する
+    if (Number.isFinite(viewpoint.heading)) {
+      const headingRad = THREE.MathUtils.degToRad(viewpoint.heading);
+      const radius = 6;
+      this.camera.position.x += Math.sin(headingRad) * radius;
+      this.camera.position.z += Math.cos(headingRad) * radius;
+    }
+
+    this.controls.update();
   }
 
   resetView() {

@@ -13,29 +13,35 @@ const mapProvider = new MapDataProvider();
 const viewer = new TerrainViewer(ui.viewerRoot);
 
 const runtime = {
-  lat: 35.3606,
-  lng: 138.7273,
-  activePreset: null
+  center: {
+    lat: 35.3606,
+    lng: 138.7273,
+    label: "富士山周辺"
+  },
+  activePreset: "wide"
 };
 
 stateStore.subscribe((phase) => dom.setPhase(phase));
 
-function updateConfigSummary(generatedData = null) {
-  dom.updateRangeLabels();
-  dom.updateSummaryResolution(generatedData);
-}
+function setCenter(lat, lng, label, query = "") {
+  runtime.center = {
+    lat: Number(lat),
+    lng: Number(lng),
+    label
+  };
 
-function updateLocation(lat, lng, label, query = "") {
-  runtime.lat = Number(lat);
-  runtime.lng = Number(lng);
-  dom.updateLocation(runtime.lat, runtime.lng, label, query);
+  if (query) {
+    ui.searchQuery.value = query;
+  }
+
+  dom.setCenterSummary(runtime);
 }
 
 function setPreset(type) {
   const presets = {
-    point: { width: 1.0, height: 1.0, zoom: "15" },
-    city: { width: 4.0, height: 4.0, zoom: "14" },
-    region: { width: 10.0, height: 10.0, zoom: "13" }
+    wide: { width: 40, height: 40, zoom: "10" },
+    mid: { width: 18, height: 18, zoom: "11" },
+    focus: { width: 8, height: 8, zoom: "12" }
   };
 
   const preset = presets[type];
@@ -43,12 +49,12 @@ function setPreset(type) {
     return;
   }
 
-  ui.width.value = preset.width.toFixed(1);
-  ui.height.value = preset.height.toFixed(1);
+  ui.width.value = String(preset.width);
+  ui.height.value = String(preset.height);
   ui.zoom.value = preset.zoom;
   runtime.activePreset = type;
   dom.setPresetActive(type);
-  updateConfigSummary();
+  dom.updateSummaryArea();
 }
 
 function clearPresetSelection() {
@@ -57,25 +63,24 @@ function clearPresetSelection() {
 }
 
 function markReadyIfAvailable() {
-  if (stateStore.phase === AppPhase.SPLASH) {
+  if (stateStore.phase === AppPhase.SPLASH || stateStore.phase === AppPhase.GENERATING) {
     return;
   }
   stateStore.setPhase(AppPhase.READY_TO_GENERATE);
 }
 
 async function searchLocation() {
-  const query = ui.searchInput.value.trim();
-
+  const query = ui.searchQuery.value.trim();
   if (!query) {
-    dom.setSearchStatus("地名を入力してください。", "error");
     stateStore.setPhase(AppPhase.ERROR);
-    ui.statusDetail.textContent = "検索欄に地名または施設名を入力してから再実行してください。";
+    ui.statusDetail.textContent = "原因: 地点未入力 / 影響: 中心点未設定 / 次: 地点名を入力して再検索してください。";
+    dom.setSearchStatus("中心地点を入力してください。", "error");
     return;
   }
 
   dom.setBusy(true);
-  dom.setSearchStatus("地名を検索しています...", "loading");
   stateStore.setPhase(AppPhase.SEARCHING);
+  dom.setSearchStatus(`地点を検索中: ${query}`, "loading");
 
   try {
     const params = new URLSearchParams({
@@ -87,65 +92,75 @@ async function searchLocation() {
 
     const response = await fetch(`https://nominatim.openstreetmap.org/search?${params.toString()}`);
     if (!response.ok) {
-      throw new Error("検索サービスに接続できませんでした。少し時間をおいて再試行してください。");
+      throw new Error("検索サービスに接続できませんでした。通信状態を確認してください。");
     }
 
     const data = await response.json();
     if (!Array.isArray(data) || data.length === 0) {
-      throw new Error("該当する地点が見つかりませんでした。別の地名で試してください。");
+      throw new Error("地点が見つかりません。別のキーワードで再検索してください。");
     }
 
     const result = data[0];
-    const label = result.display_name || query;
-    updateLocation(result.lat, result.lon, label, query);
-    dom.setSearchStatus(`地点を設定しました: ${label}`);
+    setCenter(result.lat, result.lon, result.display_name || query, query);
+
+    dom.setSearchStatus(`中心地点を設定しました: ${runtime.center.label}`);
     stateStore.setPhase(AppPhase.READY_TO_GENERATE);
   } catch (error) {
-    dom.setSearchStatus(error.message, "error");
     stateStore.setPhase(AppPhase.ERROR);
-    ui.statusDetail.textContent = error.message;
+    ui.statusDetail.textContent = `原因: ${error.message} / 影響: 中心点未更新 / 次: 検索語を見直して再試行してください。`;
+    dom.setSearchStatus(error.message, "error");
   } finally {
     dom.setBusy(false);
   }
 }
 
 async function generateTerrain() {
-  if (!Number.isFinite(runtime.lat) || !Number.isFinite(runtime.lng)) {
-    stateStore.setPhase(AppPhase.ERROR);
-    ui.statusDetail.textContent = "中心点が不正です。地点を再設定してください。";
-    return;
-  }
+  const config = dom.getTerrainConfig(runtime);
 
-  const config = dom.getConfig();
-  config.lat = runtime.lat;
-  config.lng = runtime.lng;
-
-  ui.heightScale.value = config.heightScale.toFixed(1);
   dom.setBusy(true);
   dom.setLoading(true, "標高タイルを取得しています...");
   stateStore.setPhase(AppPhase.GENERATING);
 
   try {
-    const bounds = GeoUtils.calculateBounds(config.lat, config.lng, config.widthKm, config.heightKm);
+    const bounds = GeoUtils.calculateBounds(config.centerLat, config.centerLng, config.widthKm, config.heightKm);
 
     const data = await mapProvider.fetchMapData(bounds, config.zoom, config.useTexture, ({ loaded, total }) => {
       dom.setLoading(true, `標高タイルを取得しています... ${loaded}/${total}`);
-      ui.statusDetail.textContent = `${loaded}/${total} タイルを処理中です。`;
+      ui.statusDetail.textContent = `広域タイルを処理中です (${loaded}/${total})`;
     });
 
-    viewer.update(data, config);
-    updateConfigSummary(data);
-    dom.setSearchStatus("地形を生成しました。必要なら設定を調整して再生成してください。");
+    const meshInfo = viewer.update(data, config);
+    dom.updateSummaryArea(meshInfo);
     dom.setGeneratedAvailability(true);
     stateStore.setPhase(AppPhase.GENERATED);
+    dom.setSearchStatus("地形を生成しました。まず 3Dモデルを保存してください。");
   } catch (error) {
-    dom.setSearchStatus(error.message, "error");
     stateStore.setPhase(AppPhase.ERROR);
-    ui.statusDetail.textContent = error.message;
+    ui.statusDetail.textContent = `原因: ${error.message} / 影響: 地形未生成 / 次: 範囲を縮小するかズームを下げて再試行してください。`;
+    dom.setSearchStatus(error.message, "error");
   } finally {
     dom.setLoading(false, "標高タイルを取得しています...");
     dom.setBusy(false);
   }
+}
+
+function applyGeneratedView() {
+  if (!viewer.currentMesh) {
+    return;
+  }
+
+  const post = dom.getPostConfig();
+  viewer.camera.fov = Math.min(120, Math.max(20, post.fov));
+  viewer.camera.updateProjectionMatrix();
+  viewer.applyAtmosphere({ skyPreset: "clear", timePreset: post.timePreset });
+  dom.setSearchStatus("生成済みモデルを基準に視点を調整しました。");
+}
+
+function showPlacementGuide() {
+  dom.setPlacementGuide(
+    "配置ガイド: Unity は 1unit=1m、Unreal は 1uu=1cm。原点合わせ後、遠景用LODで描画負荷を確認してください。"
+  );
+  dom.setSearchStatus("配置ガイドを表示しました。エンジン側で座標系とスケールを確認してください。");
 }
 
 function exportTerrain() {
@@ -155,7 +170,7 @@ function exportTerrain() {
 
   dom.setBusy(true);
   stateStore.setPhase(AppPhase.GENERATING);
-  ui.statusDetail.textContent = "GLB の書き出し処理を実行しています。";
+  ui.statusDetail.textContent = "GLB 出力を準備しています。";
 
   const exporter = new GLTFExporter();
   viewer.currentMesh.updateMatrixWorld(true);
@@ -163,7 +178,7 @@ function exportTerrain() {
   exporter.parse(
     viewer.currentMesh,
     (glb) => {
-      const filename = `gsi_terrain_${Date.now()}.glb`;
+      const filename = `morimorimori_terrain_${Date.now()}.glb`;
       const blob = new Blob([glb], { type: "application/octet-stream" });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
@@ -173,38 +188,48 @@ function exportTerrain() {
       URL.revokeObjectURL(url);
 
       stateStore.setPhase(AppPhase.GENERATED);
-      ui.statusDetail.textContent = `${filename} のダウンロードを開始しました。`;
+      ui.statusDetail.textContent = `${filename} を保存しました。次に配置検証へ進んでください。`;
       dom.setBusy(false);
     },
     (error) => {
       stateStore.setPhase(AppPhase.ERROR);
-      ui.statusDetail.textContent = error?.message || "GLB の書き出しに失敗しました。";
+      ui.statusDetail.textContent = `原因: ${error?.message || "書き出し失敗"} / 影響: ファイル未保存 / 次: 再試行してください。`;
       dom.setBusy(false);
     },
     { binary: true }
   );
 }
 
-function openWorkspace(useSample = false) {
+function openWorkspace(withSample = false) {
   dom.closeSplash();
 
-  if (useSample) {
-    updateLocation(35.3606, 138.7273, "富士山周辺", "富士山");
-    dom.setSearchStatus("富士山のサンプル設定を読み込みました。");
+  if (withSample) {
+    setCenter(35.3606, 138.7273, "富士山周辺", "富士山");
+    setPreset("wide");
     stateStore.setPhase(AppPhase.READY_TO_GENERATE);
+    dom.setSearchStatus("サンプル条件を適用しました。地形生成から開始してください。");
     return;
   }
 
   stateStore.setPhase(AppPhase.IDLE);
+  dom.setSearchStatus("まず地点を検索して中心点を設定してください。");
 }
 
 ui.enterButton.addEventListener("click", () => openWorkspace(false));
-ui.enterSampleButton.addEventListener("click", () => openWorkspace(true));
+ui.applySampleButton.addEventListener("click", () => openWorkspace(true));
 ui.searchButton.addEventListener("click", searchLocation);
-ui.searchInput.addEventListener("keydown", (event) => {
+ui.searchQuery.addEventListener("keydown", (event) => {
   if (event.key === "Enter") {
     searchLocation();
   }
+});
+
+ui.quickLocationButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    setCenter(button.dataset.lat, button.dataset.lng, button.dataset.label, button.textContent);
+    dom.setSearchStatus(`${button.dataset.label} を中心地点に設定しました。`);
+    stateStore.setPhase(AppPhase.READY_TO_GENERATE);
+  });
 });
 
 ui.width.addEventListener("input", () => {
@@ -212,7 +237,7 @@ ui.width.addEventListener("input", () => {
     ui.height.value = ui.width.value;
   }
   clearPresetSelection();
-  updateConfigSummary();
+  dom.updateSummaryArea();
   markReadyIfAvailable();
 });
 
@@ -221,12 +246,12 @@ ui.height.addEventListener("input", () => {
     ui.width.value = ui.height.value;
   }
   clearPresetSelection();
-  updateConfigSummary();
+  dom.updateSummaryArea();
   markReadyIfAvailable();
 });
 
 ui.zoom.addEventListener("change", () => {
-  updateConfigSummary();
+  dom.updateSummaryArea();
   markReadyIfAvailable();
 });
 
@@ -236,13 +261,14 @@ ui.heightScale.addEventListener("change", () => {
   markReadyIfAvailable();
 });
 
-ui.texture.addEventListener("change", markReadyIfAvailable);
+ui.cameraFov.addEventListener("change", dom.updateSummaryArea.bind(dom));
+ui.timePreset.addEventListener("change", markReadyIfAvailable);
 
 ui.lockButton.addEventListener("click", () => {
   dom.setLockState(!dom.isLocked);
   if (dom.isLocked) {
     ui.height.value = ui.width.value;
-    updateConfigSummary();
+    dom.updateSummaryArea();
   }
 });
 
@@ -253,24 +279,14 @@ ui.presetButtons.forEach((button) => {
   });
 });
 
-ui.quickLocationButtons.forEach((button) => {
-  button.addEventListener("click", () => {
-    const lat = Number.parseFloat(button.dataset.lat);
-    const lng = Number.parseFloat(button.dataset.lng);
-    const label = button.dataset.label || button.dataset.location;
-    const query = button.dataset.location || "";
-    updateLocation(lat, lng, label, query);
-    dom.setSearchStatus(`${label} を中心点に設定しました。`);
-    stateStore.setPhase(AppPhase.READY_TO_GENERATE);
-  });
-});
-
 ui.generateButton.addEventListener("click", generateTerrain);
 ui.exportButton.addEventListener("click", exportTerrain);
+ui.applyViewpointButton.addEventListener("click", applyGeneratedView);
+ui.showPlacementGuideButton.addEventListener("click", showPlacementGuide);
 ui.resetButton.addEventListener("click", () => {
   viewer.resetView();
   if (stateStore.phase !== AppPhase.SPLASH) {
-    ui.statusDetail.textContent = "生成済み地形の表示範囲に視点を戻しました。";
+    ui.statusDetail.textContent = "視点を地形全体が見える位置に戻しました。";
   }
 });
 
@@ -281,8 +297,8 @@ document.addEventListener("keydown", (event) => {
 });
 
 dom.setLockState(true);
-updateLocation(runtime.lat, runtime.lng, "富士山周辺", "富士山");
-updateConfigSummary();
-dom.setSearchStatus("地名を入力するか、クイック地点から中心点を選択してください。");
+setCenter(runtime.center.lat, runtime.center.lng, runtime.center.label, "富士山");
+setPreset("wide");
 dom.setBusy(false);
 dom.setGeneratedAvailability(false);
+dom.setPlacementGuide("地形生成後に、Unity/Unreal向け配置ガイドを表示します。");
