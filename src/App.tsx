@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
+import { OSMPreviewMap } from "@/components/map/osm-preview-map";
 import { GeoUtils } from "@/lib/geo-utils";
 import { AppPhase, phaseViewModel } from "@/state/app-state";
 
@@ -116,6 +117,11 @@ export function App() {
     lng: 138.7273,
     label: "富士山周辺"
   });
+  const [pendingCenter, setPendingCenter] = useState<Center>({
+    lat: 35.3606,
+    lng: 138.7273,
+    label: "富士山周辺"
+  });
   const [terrain, setTerrain] = useState<Terrain>({ width: 40, height: 40, zoom: 12 });
   const [cameraFov, setCameraFov] = useState(55);
   const [eyeHeight, setEyeHeight] = useState(1.6);
@@ -215,7 +221,9 @@ export function App() {
   }
 
   function setCenterPoint(lat: number | string, lng: number | string, label: string, query = "") {
-    setCenter({ lat: Number(lat), lng: Number(lng), label });
+    const nextCenter = { lat: Number(lat), lng: Number(lng), label };
+    setCenter(nextCenter);
+    setPendingCenter(nextCenter);
     if (query) setSearchQuery(query);
   }
 
@@ -228,6 +236,7 @@ export function App() {
       return;
     }
 
+    let autoPreviewStarted = false;
     setBusy(true);
     setPhase(AppPhase.SEARCHING);
     setDetailOverride(null);
@@ -249,26 +258,44 @@ export function App() {
         throw new Error("地点が見つかりません。別のキーワードで再検索してください。");
       }
       const result = data[0];
-      setCenterPoint(result.lat, result.lon, result.display_name || query, query);
-      setPhase(AppPhase.READY_TO_GENERATE);
-      setDetailOverride(null);
-      setSearchStatus(`中心地点を設定しました: ${result.display_name || query}`);
+      const nextCenter: Center = {
+        lat: Number(result.lat),
+        lng: Number(result.lon),
+        label: result.display_name || query
+      };
+      const previewTerrain: Terrain = { width: 18, height: 18, zoom: 12 };
+
+      setCenterPoint(nextCenter.lat, nextCenter.lng, nextCenter.label, query);
+      setTerrain(previewTerrain);
+      setActivePreset(null);
+      setSearchStatus(`中心地点を設定しました: ${nextCenter.label} / 標準ズーム(12)で地形を表示します。`);
+      autoPreviewStarted = true;
+      await generateTerrain({
+        trigger: "search-auto",
+        terrainOverride: previewTerrain,
+        centerOverride: nextCenter
+      });
     } catch (error: unknown) {
       const message = getErrorMessage(error);
       setPhase(AppPhase.ERROR);
       setDetailOverride(`原因: ${message} / 影響: 中心点未更新 / 次: 検索語を見直して再試行してください。`);
       setSearchStatus(message);
     } finally {
-      setBusy(false);
+      if (!autoPreviewStarted) {
+        setBusy(false);
+      }
     }
   }
 
-  async function generateTerrain() {
+  async function generateTerrain(options?: { trigger?: "manual" | "search-auto"; terrainOverride?: Terrain; centerOverride?: Center }) {
     const viewer = viewerRef.current;
     if (!viewer) {
       setSearchStatus("3Dビューを初期化中です。数秒待って再試行してください。");
       return;
     }
+
+    const terrainForGeneration = options?.terrainOverride ?? terrain;
+    const centerForGeneration = options?.centerOverride ?? center;
 
     setBusy(true);
     setLoadingVisible(true);
@@ -281,18 +308,23 @@ export function App() {
         const { MapDataProvider } = await import("@/services/map-data-provider");
         providerRef.current = new MapDataProvider() as unknown as MapDataProviderLike;
       }
-      const bounds = GeoUtils.calculateBounds(center.lat, center.lng, terrain.width, terrain.height);
-      const data = await providerRef.current.fetchMapData(bounds, terrain.zoom, true, ({ loaded, total }) => {
+      const bounds = GeoUtils.calculateBounds(
+        centerForGeneration.lat,
+        centerForGeneration.lng,
+        terrainForGeneration.width,
+        terrainForGeneration.height
+      );
+      const data = await providerRef.current.fetchMapData(bounds, terrainForGeneration.zoom, true, ({ loaded, total }) => {
         setLoadingText(`標高タイルを取得しています... ${loaded}/${total}`);
         setDetailOverride(`広域タイルを処理中です (${loaded}/${total})`);
       });
 
       const nextMeshInfo = viewer.update(data, {
-        centerLat: center.lat,
-        centerLng: center.lng,
-        widthKm: terrain.width,
-        heightKm: terrain.height,
-        zoom: terrain.zoom,
+        centerLat: centerForGeneration.lat,
+        centerLng: centerForGeneration.lng,
+        widthKm: terrainForGeneration.width,
+        heightKm: terrainForGeneration.height,
+        zoom: terrainForGeneration.zoom,
         useTexture: true
       });
 
@@ -302,7 +334,11 @@ export function App() {
       setPhase(AppPhase.GENERATED);
       setDetailOverride(null);
       setPlacementGuide("1. 地形上の見たい地点を指定 2. 目線高さで360°を確認");
-      setSearchStatus("地形を生成しました。必要なら視点ポイントを指定して360°で確認してください。");
+      setSearchStatus(
+        options?.trigger === "search-auto"
+          ? "検索地点の地形を標準ズーム(12)で表示しました。必要なら範囲や細かさを調整して再生成してください。"
+          : "地形を生成しました。必要なら視点ポイントを指定して360°で確認してください。"
+      );
     } catch (error: unknown) {
       const message = getErrorMessage(error);
       setPhase(AppPhase.ERROR);
@@ -311,6 +347,22 @@ export function App() {
     } finally {
       setLoadingVisible(false);
       setBusy(false);
+    }
+  }
+
+  async function applyPendingCenter(autoPreview: boolean) {
+    const nextCenter = pendingCenter;
+    setCenter(nextCenter);
+    setPhase(AppPhase.READY_TO_GENERATE);
+    setDetailOverride(null);
+    setSearchStatus("2D地図で確認した中心点を反映しました。");
+
+    if (autoPreview) {
+      await generateTerrain({
+        trigger: "manual",
+        terrainOverride: terrain,
+        centerOverride: nextCenter
+      });
     }
   }
 
@@ -399,7 +451,7 @@ export function App() {
     }
     setPhase(AppPhase.IDLE);
     setDetailOverride(null);
-    setSearchStatus("まず地点を検索して中心点を設定してください。");
+    setSearchStatus("まず地点を検索してください。検索後に標準ズーム(12)で地形を自動表示します。");
   }
 
   function onWidthChange(value: number[]) {
@@ -527,6 +579,33 @@ export function App() {
                 ))}
               </div>
               <p className="text-xs text-slate-300">{centerMeta}</p>
+              <div className="space-y-2 rounded-md border border-slate-700 bg-slate-800/50 p-2">
+                <p className="text-xs font-medium text-cyan-200">2D地図で位置確認（OSM）</p>
+                <OSMPreviewMap
+                  center={pendingCenter}
+                  heightKm={terrain.height}
+                  onPickCenter={(picked) => {
+                    setPendingCenter({
+                      lat: picked.lat,
+                      lng: picked.lng,
+                      label: `地図指定 ${picked.lat.toFixed(4)}, ${picked.lng.toFixed(4)}`
+                    });
+                    setSearchStatus("2D地図で候補地点を指定しました。「地図中心を反映」で確定できます。");
+                  }}
+                  widthKm={terrain.width}
+                />
+                <p className="text-[11px] text-slate-300">
+                  候補中心: {pendingCenter.lat.toFixed(4)}, {pendingCenter.lng.toFixed(4)} / 青枠は現在の生成範囲
+                </p>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Button onClick={() => void applyPendingCenter(false)} size="sm" variant="secondary">
+                    地図中心を反映
+                  </Button>
+                  <Button onClick={() => void applyPendingCenter(true)} size="sm" variant="outline">
+                    反映して地形を生成
+                  </Button>
+                </div>
+              </div>
             </section>
 
             <section className="space-y-3">
