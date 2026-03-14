@@ -1,0 +1,21 @@
+@import "tailwindcss";
+
+:root {
+  font-family: "Noto Sans JP", sans-serif;
+  color: #f8fafc;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  background: #020617;
+}

@@ -7,7 +7,8 @@
       name="description"
       content="国土地理院の標高タイルで広域地形を生成し、GLBとして保存できるVR遠景地形制作ツール。"
     />
-    <meta name="theme-color" content="#07111b" />
+    <meta name="theme-color" content="#0f172a" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%230f172a'/%3E%3Cpath d='M18 70L36 36L50 58L64 30L82 70Z' fill='%2322d3ee'/%3E%3C/svg%3E" />
     <title>Morimorimori | VR遠景地形スタジオ</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -16,165 +17,8 @@
       rel="stylesheet"
     />
   </head>
-  <body data-state="splash">
-    <div class="c-overlay c-overlay--loading" data-component="LoadingOverlay" aria-live="polite" aria-hidden="true">
-      <div class="c-dialog-card">
-        <div class="c-spinner" aria-hidden="true"></div>
-        <p class="c-dialog-title">広域地形を生成しています</p>
-        <p class="c-dialog-copy" data-component="LoadingText">標高タイルを取得しています...</p>
-      </div>
-    </div>
-
-    <div class="c-overlay c-overlay--splash" data-component="SplashOverlay" aria-modal="true" aria-hidden="false" role="dialog">
-      <div class="c-splash-card">
-        <h1 class="c-brand-title">Morimorimori<span>VR遠景地形スタジオ</span></h1>
-        <p class="c-dialog-copy">まず地形を生成し、GLB を保存してから配置・視点検証へ進みます。</p>
-        <div class="c-splash-actions">
-          <button class="c-button c-button--primary" type="button" data-action="enter-workspace">制作を始める</button>
-          <button class="c-button c-button--secondary" type="button" data-action="apply-sample">富士山のサンプルで始める</button>
-        </div>
-      </div>
-    </div>
-
-    <main class="l-app-shell">
-      <section class="l-viewport" id="viewer-root" data-component="ViewerRoot" aria-label="3Dビュー"></section>
-
-      <aside class="l-control-panel" data-component="ControlPanel">
-        <header class="c-panel-header">
-          <h1 class="c-brand-title c-brand-title--compact">Morimorimori<span>VR遠景地形スタジオ</span></h1>
-          <div class="c-status-pill" data-component="StatusPill" data-state="splash">
-            <span class="c-status-dot" aria-hidden="true"></span>
-            <span data-component="StatusPillText">開始前</span>
-          </div>
-        </header>
-
-        <section class="c-panel" data-component="StatusBlock">
-          <h2 class="c-panel-title">現在の状態</h2>
-          <p class="c-status-main" data-component="StatusTitle">開始前です</p>
-          <p class="c-status-detail" data-component="StatusDetail">先に地形を生成し、GLB を保存してください。</p>
-        </section>
-
-        <section class="c-panel c-panel--step">
-          <details open>
-            <summary class="c-step-summary">ステップ1: 地点を設定</summary>
-            <div class="c-step-body">
-              <div class="c-field-block">
-                <label class="c-label" for="location-query">中心地点を検索</label>
-                <div class="c-search-row">
-                  <input id="location-query" class="c-field" type="text" data-component="SearchQuery" placeholder="例: 富士山、箱根、横浜" />
-                  <button class="c-button c-button--inline" type="button" data-action="search-location">検索</button>
-                </div>
-              </div>
-              <div class="c-chip-row">
-                <button class="c-chip" type="button" data-action="quick-location" data-label="富士山周辺" data-lat="35.3606" data-lng="138.7273">富士山</button>
-                <button class="c-chip" type="button" data-action="quick-location" data-label="横浜エリア" data-lat="35.4547" data-lng="139.6316">横浜</button>
-                <button class="c-chip" type="button" data-action="quick-location" data-label="箱根エリア" data-lat="35.2323" data-lng="139.1069">箱根</button>
-              </div>
-              <p class="c-inline-meta" data-component="CenterMeta">中心: 35.3606, 138.7273 (富士山周辺)</p>
-            </div>
-          </details>
-        </section>
-
-        <section class="c-panel c-panel--step">
-          <details open>
-            <summary class="c-step-summary">ステップ2: 地形を生成</summary>
-            <div class="c-step-body">
-              <div class="c-chip-row">
-                <button class="c-chip" type="button" data-action="apply-preset" data-preset="wide">広域 40km</button>
-                <button class="c-chip" type="button" data-action="apply-preset" data-preset="mid">中域 18km</button>
-                <button class="c-chip" type="button" data-action="apply-preset" data-preset="focus">焦点 8km</button>
-              </div>
-
-              <label class="c-range-label">幅 <span data-component="WidthValue">40.0 km</span></label>
-              <input type="range" min="4" max="80" step="1" value="40" data-component="WidthRange" />
-              <div class="c-lock-row">
-                <button class="c-icon-button is-active" type="button" data-action="toggle-ratio-lock" aria-label="縦横比を固定中">比率固定</button>
-                <span data-component="LockState">縦横比を固定中</span>
-              </div>
-              <label class="c-range-label">奥行 <span data-component="HeightValue">40.0 km</span></label>
-              <input type="range" min="4" max="80" step="1" value="40" data-component="HeightRange" />
-
-              <div class="c-field-grid">
-                <label>地形の細かさ
-                  <select class="c-field" data-component="ZoomSelect">
-                    <option value="12" selected>標準（推奨）</option>
-                    <option value="13">精細</option>
-                    <option value="14">高精細</option>
-                    <option value="15">最高精細</option>
-                  </select>
-                </label>
-              </div>
-              <p class="c-inline-meta">目安: 細かくするほど地形の凹凸は正確になりますが、生成時間は長くなります。</p>
-
-              <div class="c-summary-line">
-                <span>総面積</span>
-                <strong data-component="TotalArea">1600.00 km²</strong>
-              </div>
-              <p class="c-inline-meta" data-component="LoadEstimate">推定負荷: 中 / 目安時間: 40秒</p>
-            </div>
-          </details>
-        </section>
-
-        <section class="c-panel c-panel--step c-panel--post" data-component="PostGeneratePanel">
-          <details>
-            <summary class="c-step-summary">ステップ3: 視点ポイントと360°確認（生成後）</summary>
-            <div class="c-step-body">
-              <div class="c-field-grid c-field-grid--double">
-                <label>FOV(度)
-                  <input class="c-field" type="number" min="20" max="120" step="1" value="55" data-component="CameraFov" />
-                </label>
-                <label>視点の高さ(m)
-                  <input class="c-field" type="number" min="1.0" max="3.0" step="0.1" value="1.6" data-component="EyeHeight" />
-                </label>
-              </div>
-              <div class="c-field-grid">
-                <label>時間帯
-                  <select class="c-field" data-component="TimePreset">
-                    <option value="morning">朝</option>
-                    <option value="day" selected>昼</option>
-                    <option value="evening">夕</option>
-                  </select>
-                </label>
-              </div>
-              <div class="c-action-row c-action-row--compact">
-                <button class="c-button c-button--secondary" type="button" data-action="apply-viewpoint" disabled>視点ポイントを地形上で指定</button>
-                <button class="c-button c-button--ghost" type="button" data-action="show-placement-guide" disabled>人間視点で360°表示</button>
-              </div>
-              <p class="c-inline-meta" data-component="PlacementGuide">1. 地形上の見たい地点を指定 2. 目線高さで360°を確認</p>
-            </div>
-          </details>
-        </section>
-
-        <section class="c-action-stack c-action-stack--sticky">
-          <button class="c-button c-button--primary" type="button" data-action="generate-terrain">この条件で地形を生成</button>
-          <div class="c-action-row">
-            <button class="c-button c-button--secondary" type="button" data-action="export-glb" disabled>3Dモデルを保存</button>
-            <button class="c-button c-button--ghost" type="button" data-action="reset-camera" disabled>視点を戻す</button>
-          </div>
-          <p class="c-helper" data-component="SearchStatus">まず地点を設定してから地形を生成してください。</p>
-        </section>
-
-        <p class="c-footnote">出力メモ: Unity は 1unit=1m、Unreal は 1uu=1cm。Y-up / Z-up 差分に注意してください。</p>
-      </aside>
-
-      <aside class="l-info-rail" data-component="InfoRail" aria-label="生成結果サマリー">
-        <article class="c-summary-card">
-          <span>中心地点</span>
-          <p data-component="SummaryPlace">富士山周辺</p>
-          <small data-component="SummaryCenter">35.3606, 138.7273</small>
-        </article>
-        <article class="c-summary-card">
-          <span>範囲と解像度</span>
-          <p data-component="SummaryArea">40.0 x 40.0 km</p>
-          <small data-component="SummaryResolution">細かさ 標準（推奨） / FOV 55</small>
-        </article>
-      </aside>
-
-      <aside class="l-hint" data-component="HintBlock">
-        <p>ドラッグ: 回転 / スクロール: 拡大縮小 / 右ドラッグ: 平行移動</p>
-      </aside>
-    </main>
-
-    <script type="module" src="/src/main.js"></script>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
