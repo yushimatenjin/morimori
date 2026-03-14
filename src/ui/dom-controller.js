@@ -26,9 +26,9 @@ export class DomController {
       loadEstimate: document.querySelector('[data-component="LoadEstimate"]'),
 
       zoom: document.querySelector('[data-component="ZoomSelect"]'),
-      heightScale: document.querySelector('[data-component="HeightScaleInput"]'),
 
       cameraFov: document.querySelector('[data-component="CameraFov"]'),
+      eyeHeight: document.querySelector('[data-component="EyeHeight"]'),
       timePreset: document.querySelector('[data-component="TimePreset"]'),
       placementGuide: document.querySelector('[data-component="PlacementGuide"]'),
       postGeneratePanel: document.querySelector('[data-component="PostGeneratePanel"]'),
@@ -65,22 +65,22 @@ export class DomController {
   }
 
   getTerrainConfig(runtime) {
-    const heightScaleRaw = Number.parseFloat(this.ui.heightScale.value);
     return {
       centerLat: runtime.center.lat,
       centerLng: runtime.center.lng,
       widthKm: Number.parseFloat(this.ui.width.value),
       heightKm: Number.parseFloat(this.ui.height.value),
       zoom: Number.parseInt(this.ui.zoom.value, 10),
-      heightScale: Number.isFinite(heightScaleRaw) && heightScaleRaw > 0 ? heightScaleRaw : 1,
       useTexture: true
     };
   }
 
   getPostConfig() {
     const fov = Number.parseFloat(this.ui.cameraFov.value);
+    const eyeHeight = Number.parseFloat(this.ui.eyeHeight.value);
     return {
       fov: Number.isFinite(fov) ? fov : 55,
+      eyeHeight: Number.isFinite(eyeHeight) ? eyeHeight : 1.6,
       timePreset: this.ui.timePreset.value
     };
   }
@@ -122,6 +122,7 @@ export class DomController {
     const width = Number.parseFloat(this.ui.width.value);
     const height = Number.parseFloat(this.ui.height.value);
     const zoom = this.ui.zoom.value;
+    const zoomLabel = this.getZoomLabel(zoom);
     const fov = this.ui.cameraFov.value;
 
     this.ui.widthValue.textContent = `${width.toFixed(1)} km`;
@@ -129,8 +130,8 @@ export class DomController {
     this.ui.totalArea.textContent = `${(width * height).toFixed(2)} km²`;
     this.ui.summaryArea.textContent = `${width.toFixed(1)} x ${height.toFixed(1)} km`;
     this.ui.summaryResolution.textContent = meshData
-      ? `ズーム ${zoom} / ${meshData.width} x ${meshData.height} / FOV ${fov}`
-      : `ズーム ${zoom} / FOV ${fov}`;
+      ? `細かさ ${zoomLabel} / ${meshData.width} x ${meshData.height} / FOV ${fov}`
+      : `細かさ ${zoomLabel} / FOV ${fov}`;
 
     this.ui.loadEstimate.textContent = this.formatLoadEstimate(width, height, Number.parseInt(zoom, 10));
   }
@@ -147,6 +148,16 @@ export class DomController {
       return "推定負荷: 中 / 目安時間: 40秒";
     }
     return "推定負荷: 高 / 目安時間: 90秒以上";
+  }
+
+  getZoomLabel(zoom) {
+    const labels = {
+      "12": "標準（推奨）",
+      "13": "精細",
+      "14": "高精細",
+      "15": "最高精細"
+    };
+    return labels[String(zoom)] || "標準（推奨）";
   }
 
   setPresetActive(type) {

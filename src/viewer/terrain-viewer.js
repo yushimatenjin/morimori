@@ -1,12 +1,11 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import { Sky } from "three/examples/jsm/objects/Sky.js";
 import { GeoUtils } from "../lib/geo-utils.js";
 
-const SKY_PRESETS = {
-  clear: { turbidity: 6, rayleigh: 2.1, mieCoefficient: 0.0035, mieDirectionalG: 0.78, elevation: 66, azimuth: 210 },
-  hazy: { turbidity: 12, rayleigh: 1.2, mieCoefficient: 0.009, mieDirectionalG: 0.82, elevation: 58, azimuth: 212 },
-  dramatic: { turbidity: 8, rayleigh: 0.9, mieCoefficient: 0.012, mieDirectionalG: 0.84, elevation: 40, azimuth: 238 }
+const LIGHT_PRESETS = {
+  clear: { elevation: 66, azimuth: 210, hemisphere: 1.1, directional: 1.35, ambient: 0.28 },
+  hazy: { elevation: 58, azimuth: 212, hemisphere: 1.0, directional: 1.2, ambient: 0.34 },
+  dramatic: { elevation: 40, azimuth: 238, hemisphere: 0.95, directional: 1.1, ambient: 0.2 }
 };
 
 export class TerrainViewer {
@@ -34,9 +33,27 @@ export class TerrainViewer {
     this.controls.maxDistance = 900000;
     this.controls.target.set(0, 200, 0);
 
+    this.raycaster = new THREE.Raycaster();
+    this.pointer = new THREE.Vector2();
+    this.pickCallback = null;
+    this.isStreetViewMode = false;
+    this.viewpointMarker = null;
+    this.streetViewState = {
+      yaw: 0,
+      pitch: 0,
+      dragging: false,
+      lastX: 0,
+      lastY: 0
+    };
+
     this.currentMesh = null;
     this.frameState = null;
     this.geoReference = null;
+
+    this.renderer.domElement.addEventListener("click", (event) => this.handlePickClick(event));
+    this.renderer.domElement.addEventListener("mousedown", (event) => this.handleStreetViewDragStart(event));
+    this.renderer.domElement.addEventListener("mousemove", (event) => this.handleStreetViewDragMove(event));
+    window.addEventListener("mouseup", () => this.handleStreetViewDragEnd());
 
     this.initEnvironment();
     this.onResize();
@@ -45,16 +62,12 @@ export class TerrainViewer {
   }
 
   initEnvironment() {
-    this.sky = new Sky();
-    this.sky.scale.setScalar(450000);
-    this.scene.add(this.sky);
-
     this.sun = new THREE.Vector3();
-
-    const hemi = new THREE.HemisphereLight(0xcfeeff, 0x0a1422, 1.15);
-    const dir = new THREE.DirectionalLight(0xfff4df, 1.35);
-    dir.position.set(15000, 22000, 9000);
-    this.scene.add(hemi, dir);
+    this.hemiLight = new THREE.HemisphereLight(0xcfeeff, 0x0a1422, 1.1);
+    this.dirLight = new THREE.DirectionalLight(0xfff4df, 1.35);
+    this.dirLight.position.set(15000, 22000, 9000);
+    this.ambientLight = new THREE.AmbientLight(0x1a2636, 0.28);
+    this.scene.add(this.hemiLight, this.dirLight, this.ambientLight);
 
     this.applyAtmosphere({ skyPreset: "clear", timePreset: "day" });
   }
@@ -73,26 +86,39 @@ export class TerrainViewer {
 
     this.currentMesh.material.dispose();
     this.currentMesh = null;
+
+    if (this.viewpointMarker) {
+      this.scene.remove(this.viewpointMarker);
+      this.viewpointMarker.traverse((node) => {
+        if (node.geometry) {
+          node.geometry.dispose();
+        }
+        if (node.material) {
+          node.material.dispose();
+        }
+      });
+      this.viewpointMarker = null;
+    }
   }
 
   applyAtmosphere({ skyPreset = "clear", timePreset = "day" }) {
-    const preset = SKY_PRESETS[skyPreset] || SKY_PRESETS.clear;
+    const preset = LIGHT_PRESETS[skyPreset] || LIGHT_PRESETS.clear;
     const timeShift = { morning: -14, day: 0, evening: -24 }[timePreset] ?? 0;
-
-    this.sky.material.uniforms.turbidity.value = preset.turbidity;
-    this.sky.material.uniforms.rayleigh.value = preset.rayleigh;
-    this.sky.material.uniforms.mieCoefficient.value = preset.mieCoefficient;
-    this.sky.material.uniforms.mieDirectionalG.value = preset.mieDirectionalG;
 
     this.sun.setFromSphericalCoords(
       1,
       THREE.MathUtils.degToRad(Math.max(12, preset.elevation + timeShift)),
       THREE.MathUtils.degToRad(preset.azimuth)
     );
-    this.sky.material.uniforms.sunPosition.value.copy(this.sun);
+    this.dirLight.position.copy(this.sun).multiplyScalar(80000);
+    this.hemiLight.intensity = preset.hemisphere;
+    this.dirLight.intensity = preset.directional;
+    this.ambientLight.intensity = preset.ambient;
   }
 
   update(data, config) {
+    this.exitStreetView();
+    this.pickCallback = null;
     this.disposeCurrentMesh();
 
     const centerLat = (data.actualBounds.north + data.actualBounds.south) / 2;
@@ -108,7 +134,7 @@ export class TerrainViewer {
     let maxHeight = Number.NEGATIVE_INFINITY;
 
     for (let i = 0; i < data.heights.length; i += 1) {
-      const height = data.heights[i] * config.heightScale;
+      const height = data.heights[i];
       positions[i * 3 + 1] = height;
       minHeight = Math.min(minHeight, height);
       maxHeight = Math.max(maxHeight, height);
@@ -151,6 +177,123 @@ export class TerrainViewer {
     };
   }
 
+  startViewpointPick(onPicked) {
+    this.pickCallback = typeof onPicked === "function" ? onPicked : null;
+  }
+
+  handlePickClick(event) {
+    if (!this.pickCallback || !this.currentMesh) {
+      return;
+    }
+
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    this.pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    this.pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+    this.raycaster.setFromCamera(this.pointer, this.camera);
+    const hits = this.raycaster.intersectObject(this.currentMesh, false);
+    if (hits.length === 0) {
+      return;
+    }
+
+    const point = hits[0].point.clone();
+    this.setViewpointMarker(point);
+    this.pickCallback(point);
+    this.pickCallback = null;
+  }
+
+  setViewpointMarker(point) {
+    if (this.viewpointMarker) {
+      this.scene.remove(this.viewpointMarker);
+      this.viewpointMarker.traverse((node) => {
+        if (node.geometry) {
+          node.geometry.dispose();
+        }
+        if (node.material) {
+          node.material.dispose();
+        }
+      });
+    }
+
+    const markerHeight = Math.max(4, (this.frameState?.size || 1000) * 0.003);
+    const markerGroup = new THREE.Group();
+
+    const pole = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.35, 0.35, markerHeight, 14),
+      new THREE.MeshStandardMaterial({ color: 0xff7a18, emissive: 0x442100, roughness: 0.5, metalness: 0.1 })
+    );
+    pole.position.set(0, markerHeight / 2, 0);
+
+    const cap = new THREE.Mesh(
+      new THREE.SphereGeometry(1.4, 16, 16),
+      new THREE.MeshStandardMaterial({ color: 0xffcf6d, emissive: 0x5a3400, roughness: 0.3, metalness: 0.15 })
+    );
+    cap.position.set(0, markerHeight + 1.6, 0);
+
+    markerGroup.position.copy(point);
+    markerGroup.add(pole, cap);
+    this.viewpointMarker = markerGroup;
+    this.scene.add(markerGroup);
+  }
+
+  enterStreetView(point, eyeHeight = 1.6) {
+    if (!point) {
+      return;
+    }
+
+    const eyePos = point.clone();
+    eyePos.y += THREE.MathUtils.clamp(eyeHeight, 1.2, 2.2);
+
+    this.isStreetViewMode = true;
+    this.controls.enabled = false;
+    this.camera.position.copy(eyePos);
+
+    this.streetViewState.yaw = 0;
+    this.streetViewState.pitch = 0;
+    this.updateStreetViewCameraDirection();
+  }
+
+  updateStreetViewCameraDirection() {
+    const euler = new THREE.Euler(this.streetViewState.pitch, this.streetViewState.yaw, 0, "YXZ");
+    this.camera.quaternion.setFromEuler(euler);
+  }
+
+  handleStreetViewDragStart(event) {
+    if (!this.isStreetViewMode || event.button !== 0) {
+      return;
+    }
+    this.streetViewState.dragging = true;
+    this.streetViewState.lastX = event.clientX;
+    this.streetViewState.lastY = event.clientY;
+  }
+
+  handleStreetViewDragMove(event) {
+    if (!this.isStreetViewMode || !this.streetViewState.dragging) {
+      return;
+    }
+
+    const deltaX = event.clientX - this.streetViewState.lastX;
+    const deltaY = event.clientY - this.streetViewState.lastY;
+    this.streetViewState.lastX = event.clientX;
+    this.streetViewState.lastY = event.clientY;
+
+    const sensitivity = 0.003;
+    this.streetViewState.yaw -= deltaX * sensitivity;
+    this.streetViewState.pitch -= deltaY * sensitivity;
+    this.streetViewState.pitch = THREE.MathUtils.clamp(this.streetViewState.pitch, -1.45, 1.45);
+    this.updateStreetViewCameraDirection();
+  }
+
+  handleStreetViewDragEnd() {
+    this.streetViewState.dragging = false;
+  }
+
+  exitStreetView() {
+    this.isStreetViewMode = false;
+    this.streetViewState.dragging = false;
+    this.controls.enabled = true;
+  }
+
   toWorldPosition(lat, lng, altitude = 0) {
     if (!this.geoReference) {
       return new THREE.Vector3(0, altitude, 0);
@@ -188,6 +331,8 @@ export class TerrainViewer {
   }
 
   resetView() {
+    this.exitStreetView();
+
     if (!this.frameState) {
       this.camera.position.set(3200, 1800, 3200);
       this.controls.target.set(0, 200, 0);
@@ -217,7 +362,9 @@ export class TerrainViewer {
 
   animate() {
     requestAnimationFrame(() => this.animate());
-    this.controls.update();
+    if (!this.isStreetViewMode) {
+      this.controls.update();
+    }
     this.renderer.render(this.scene, this.camera);
   }
 }

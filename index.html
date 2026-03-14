@@ -94,19 +94,17 @@
               <label class="c-range-label">奥行 <span data-component="HeightValue">40.0 km</span></label>
               <input type="range" min="4" max="80" step="1" value="40" data-component="HeightRange" />
 
-              <div class="c-field-grid c-field-grid--double">
-                <label>ズーム
+              <div class="c-field-grid">
+                <label>地形の細かさ
                   <select class="c-field" data-component="ZoomSelect">
-                    <option value="9">9 | 広域高速</option>
-                    <option value="10" selected>10 | 広域推奨</option>
-                    <option value="11">11 | 中域高精細</option>
-                    <option value="12">12 | 高精細</option>
+                    <option value="12" selected>標準（推奨）</option>
+                    <option value="13">精細</option>
+                    <option value="14">高精細</option>
+                    <option value="15">最高精細</option>
                   </select>
                 </label>
-                <label>標高倍率
-                  <input class="c-field" type="number" min="0.1" step="0.1" value="1.0" data-component="HeightScaleInput" />
-                </label>
               </div>
+              <p class="c-inline-meta">目安: 細かくするほど地形の凹凸は正確になりますが、生成時間は長くなります。</p>
 
               <div class="c-summary-line">
                 <span>総面積</span>
@@ -119,12 +117,17 @@
 
         <section class="c-panel c-panel--step c-panel--post" data-component="PostGeneratePanel">
           <details>
-            <summary class="c-step-summary">ステップ3: 配置と視点検証（生成後）</summary>
+            <summary class="c-step-summary">ステップ3: 視点ポイントと360°確認（生成後）</summary>
             <div class="c-step-body">
               <div class="c-field-grid c-field-grid--double">
                 <label>FOV(度)
                   <input class="c-field" type="number" min="20" max="120" step="1" value="55" data-component="CameraFov" />
                 </label>
+                <label>視点の高さ(m)
+                  <input class="c-field" type="number" min="1.0" max="3.0" step="0.1" value="1.6" data-component="EyeHeight" />
+                </label>
+              </div>
+              <div class="c-field-grid">
                 <label>時間帯
                   <select class="c-field" data-component="TimePreset">
                     <option value="morning">朝</option>
@@ -134,10 +137,10 @@
                 </label>
               </div>
               <div class="c-action-row c-action-row--compact">
-                <button class="c-button c-button--secondary" type="button" data-action="apply-viewpoint" disabled>生成モデルで視点確認</button>
-                <button class="c-button c-button--ghost" type="button" data-action="show-placement-guide" disabled>配置ガイド表示</button>
+                <button class="c-button c-button--secondary" type="button" data-action="apply-viewpoint" disabled>視点ポイントを地形上で指定</button>
+                <button class="c-button c-button--ghost" type="button" data-action="show-placement-guide" disabled>人間視点で360°表示</button>
               </div>
-              <p class="c-inline-meta" data-component="PlacementGuide">地形生成後に、Unity/Unreal向け配置ガイドを表示します。</p>
+              <p class="c-inline-meta" data-component="PlacementGuide">1. 地形上の見たい地点を指定 2. 目線高さで360°を確認</p>
             </div>
           </details>
         </section>
@@ -163,7 +166,7 @@
         <article class="c-summary-card">
           <span>範囲と解像度</span>
           <p data-component="SummaryArea">40.0 x 40.0 km</p>
-          <small data-component="SummaryResolution">ズーム 10 / FOV 55</small>
+          <small data-component="SummaryResolution">細かさ 標準（推奨） / FOV 55</small>
         </article>
       </aside>
 

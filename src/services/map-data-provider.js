@@ -1,6 +1,9 @@
 import * as THREE from "three";
 import { GeoUtils } from "../lib/geo-utils.js";
 
+export const MAX_TILE_COUNT = 1000;
+const MAX_DEM_PIXELS = 1_500_000;
+
 export class MapDataProvider {
   constructor() {
     this.demUrl = "https://cyberjapandata.gsi.go.jp/xyz/dem_png";
@@ -8,31 +11,38 @@ export class MapDataProvider {
   }
 
   async fetchMapData(bounds, zoom, fetchPhoto, onProgress = () => {}) {
-    const startX = GeoUtils.lon2tile(bounds.west, zoom);
-    const endX = GeoUtils.lon2tile(bounds.east, zoom);
-    const startY = GeoUtils.lat2tile(bounds.north, zoom);
-    const endY = GeoUtils.lat2tile(bounds.south, zoom);
-    const countX = endX - startX + 1;
-    const countY = endY - startY + 1;
-    const totalTiles = countX * countY;
+    const { startX, endX, startY, endY, countX, countY, totalTiles } = this.estimateTileCoverage(bounds, zoom);
 
-    if (totalTiles > 144) {
-      throw new Error("取得範囲が広すぎます。範囲を狭めるか、ズームを下げてください。");
+    if (totalTiles > MAX_TILE_COUNT) {
+      throw new Error("取得範囲が広すぎます。範囲を狭めるか、地形の細かさを下げてください。");
     }
 
+    const sourceWidth = countX * 256;
+    const sourceHeight = countY * 256;
+    const downsample = Math.max(1, Math.ceil(Math.sqrt((sourceWidth * sourceHeight) / MAX_DEM_PIXELS)));
+    const targetWidth = Math.max(1, Math.floor(sourceWidth / downsample));
+    const targetHeight = Math.max(1, Math.floor(sourceHeight / downsample));
+
     const demCanvas = document.createElement("canvas");
-    demCanvas.width = countX * 256;
-    demCanvas.height = countY * 256;
+    demCanvas.width = targetWidth;
+    demCanvas.height = targetHeight;
     const demCtx = demCanvas.getContext("2d");
+    if (!demCtx) {
+      throw new Error("地形データの描画コンテキストを初期化できませんでした。");
+    }
+    demCtx.imageSmoothingEnabled = false;
 
     let photoCanvas = null;
     let photoCtx = null;
 
     if (fetchPhoto) {
       photoCanvas = document.createElement("canvas");
-      photoCanvas.width = countX * 256;
-      photoCanvas.height = countY * 256;
+      photoCanvas.width = targetWidth;
+      photoCanvas.height = targetHeight;
       photoCtx = photoCanvas.getContext("2d");
+      if (photoCtx) {
+        photoCtx.imageSmoothingEnabled = true;
+      }
     }
 
     onProgress({ loaded: 0, total: totalTiles });
@@ -43,7 +53,7 @@ export class MapDataProvider {
     for (let y = 0; y < countY; y += 1) {
       for (let x = 0; x < countX; x += 1) {
         tilePromises.push(
-          this.loadTile(startX + x, startY + y, zoom, x, y, demCtx, photoCtx).then(() => {
+          this.loadTile(startX + x, startY + y, zoom, x, y, demCtx, photoCtx, downsample).then(() => {
             loadedTiles += 1;
             onProgress({ loaded: loadedTiles, total: totalTiles });
           })
@@ -78,21 +88,44 @@ export class MapDataProvider {
     };
   }
 
-  loadTile(tileX, tileY, zoom, offsetX, offsetY, demCtx, photoCtx) {
+  estimateTileCoverage(bounds, zoom) {
+    const startX = GeoUtils.lon2tile(bounds.west, zoom);
+    const endX = GeoUtils.lon2tile(bounds.east, zoom);
+    const startY = GeoUtils.lat2tile(bounds.north, zoom);
+    const endY = GeoUtils.lat2tile(bounds.south, zoom);
+    const countX = endX - startX + 1;
+    const countY = endY - startY + 1;
+
+    return {
+      startX,
+      endX,
+      startY,
+      endY,
+      countX,
+      countY,
+      totalTiles: countX * countY
+    };
+  }
+
+  loadTile(tileX, tileY, zoom, offsetX, offsetY, demCtx, photoCtx, downsample = 1) {
+    const tileSize = 256 / downsample;
+    const drawX = offsetX * tileSize;
+    const drawY = offsetY * tileSize;
+
     const loadImage = (url, ctx, fallbackColor) =>
       new Promise((resolve) => {
         const image = new Image();
         image.crossOrigin = "anonymous";
         image.onload = () => {
           if (ctx) {
-            ctx.drawImage(image, offsetX * 256, offsetY * 256);
+            ctx.drawImage(image, drawX, drawY, tileSize, tileSize);
           }
           resolve();
         };
         image.onerror = () => {
           if (ctx) {
             ctx.fillStyle = fallbackColor;
-            ctx.fillRect(offsetX * 256, offsetY * 256, 256, 256);
+            ctx.fillRect(drawX, drawY, tileSize, tileSize);
           }
           resolve();
         };
