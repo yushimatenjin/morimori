@@ -1,0 +1,18 @@
+:root {
+  --bg-0: #02060b;
+  --bg-1: #09121d;
+  --panel: rgba(6, 14, 24, 0.88);
+  --line: rgba(255, 255, 255, 0.12);
+  --text: #edf3f8;
+  --muted: #9aaec2;
+  --accent: #69d6ea;
+  --accent-strong: #ffffff;
+  --success: #5cda92;
+  --error: #f2736d;
+  --shadow: 0 30px 80px rgba(0, 0, 0, 0.55);
+  --radius-lg: 24px;
+  --radius-md: 16px;
+  --radius-sm: 12px;
+  --font-body: "Noto Sans JP", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-accent: "Space Grotesk", monospace;
+}

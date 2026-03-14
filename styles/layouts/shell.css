@@ -1,0 +1,84 @@
+.l-app-shell {
+  position: fixed;
+  inset: 0;
+}
+
+.l-viewport {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+}
+
+.l-control-panel {
+  position: absolute;
+  z-index: 3;
+  top: 20px;
+  left: 20px;
+  width: min(430px, calc(100vw - 40px));
+  max-height: calc(100vh - 40px);
+  overflow: auto;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 28px;
+  background: var(--panel);
+  backdrop-filter: blur(16px);
+  box-shadow: var(--shadow);
+}
+
+.l-info-rail,
+.l-hint {
+  position: absolute;
+  z-index: 3;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.25s ease, transform 0.25s ease, visibility 0.25s ease;
+}
+
+.l-info-rail {
+  top: 20px;
+  right: 20px;
+  width: min(280px, calc(100vw - 40px));
+  transform: translateX(20px);
+}
+
+.l-hint {
+  right: 20px;
+  bottom: 20px;
+  transform: translateY(20px);
+}
+
+body[data-state="generated"] .l-info-rail,
+body[data-state="generated"] .l-hint {
+  opacity: 1;
+  visibility: visible;
+  transform: translate(0, 0);
+}
+
+@media (max-width: 900px) {
+  .l-control-panel {
+    top: auto;
+    left: 12px;
+    right: 12px;
+    bottom: 12px;
+    width: auto;
+    max-height: min(70vh, 860px);
+  }
+
+  .l-info-rail {
+    top: 12px;
+    right: 12px;
+    width: min(320px, calc(100vw - 24px));
+  }
+
+  .l-hint {
+    left: 12px;
+    right: 12px;
+    bottom: calc(min(70vh, 860px) + 24px);
+  }
+}
+
+@media (max-width: 680px) {
+  .l-info-rail { display: none; }
+  .l-hint { display: none; }
+}

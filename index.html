@@ -1,258 +1,152 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ja">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="国土地理院の標高タイルから、日本の地形を3Dメッシュとして生成し、GLBで書き出せる地形制作ツール。">
-    <meta name="theme-color" content="#07111b">
-    <title>地形スタジオ | 国土地理院 3D Terrain Generator</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&amp;family=Space+Grotesk:wght@500;700&amp;display=swap" rel="stylesheet">
-    <script type="importmap">
-        {
-            "imports": {
-                "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
-            }
-        }
-    </script>
-    <link rel="stylesheet" href="./styles.css">
-</head>
-<body>
-    <div id="loading" class="loading-overlay" aria-live="polite" aria-hidden="true">
-        <div class="loading-card">
-            <div class="spinner"></div>
-            <p class="loading-title">3D地形を生成しています</p>
-            <p id="loading-text" class="loading-copy">標高タイルを取得しています...</p>
-        </div>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="国土地理院の標高タイルから、日本の地形を3Dメッシュとして生成し、GLBで書き出せる地形制作ツール。"
+    />
+    <meta name="theme-color" content="#07111b" />
+    <title>TERRAIN | GSI 3D Studio</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&family=Space+Grotesk:wght@500;700&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body data-state="splash">
+    <div class="c-overlay c-overlay--loading" data-component="LoadingOverlay" aria-live="polite" aria-hidden="true">
+      <div class="c-dialog-card">
+        <div class="c-spinner" aria-hidden="true"></div>
+        <p class="c-dialog-title">地形データを処理しています</p>
+        <p class="c-dialog-copy" data-component="LoadingText">標高タイルを取得しています...</p>
+      </div>
     </div>
 
-    <div id="splash" class="splash-screen" aria-modal="true" aria-hidden="false" role="dialog">
-        <div class="splash-card">
-            <p class="brand-eyebrow">National Terrain Workflow</p>
-            <h1 class="splash-title">地形スタジオ<span>GSI Terrain Generator</span></h1>
-            <p class="splash-lead">
-                国土地理院の標高タイルとシームレス空中写真を使って、地点検索から3Dメッシュ生成、GLB書き出しまでを一気通貫で行う制作画面です。
-                日本向けの地形確認、検証、社内レビューを同じ画面で回せるように整えています。
-            </p>
-
-            <div class="mini-tags">
-                <span class="mini-tag">地名検索</span>
-                <span class="mini-tag">衛星写真テクスチャ</span>
-                <span class="mini-tag">GLBエクスポート</span>
-                <span class="mini-tag">モバイル対応UI</span>
-            </div>
-
-            <div class="splash-grid">
-                <div class="splash-step">
-                    <span class="section-step">STEP 01</span>
-                    <strong>地点を決める</strong>
-                    <p>地名検索かクイック選択で中心点を設定します。富士山、箱根、伊豆大島などをすぐ試せます。</p>
-                </div>
-                <div class="splash-step">
-                    <span class="section-step">STEP 02</span>
-                    <strong>範囲と精度を調整</strong>
-                    <p>表示範囲、ズーム、高さ倍率を決めて、重さと精度のバランスを詰めます。</p>
-                </div>
-                <div class="splash-step">
-                    <span class="section-step">STEP 03</span>
-                    <strong>生成してレビュー</strong>
-                    <p>3D表示を確認しながらGLBを書き出し、チームのフィードバックループを短く保てます。</p>
-                </div>
-            </div>
-
-            <div class="splash-actions">
-                <button id="btn-enter" class="splash-primary" type="button">作業を始める</button>
-                <button id="btn-enter-sample" class="splash-secondary" type="button">富士山の設定で始める</button>
-            </div>
-
-            <p class="note-text">ヒント: 広域を扱うときはズーム 13 から始めると安定しやすく、細部確認は 14 か 15 が向いています。</p>
+    <div class="c-overlay c-overlay--splash" data-component="SplashOverlay" aria-modal="true" aria-hidden="false" role="dialog">
+      <div class="c-splash-card">
+        <h1 class="c-brand-title">TERRAIN<span>GSI 3D Studio</span></h1>
+        <p class="c-dialog-copy">国土地理院データで3D地形を作成し、GLBとして書き出せます。</p>
+        <div class="c-splash-actions">
+          <button class="c-button c-button--primary" type="button" data-action="enter-workspace">作業を始める</button>
+          <button class="c-button c-button--secondary" type="button" data-action="enter-with-sample">富士山の設定で始める</button>
         </div>
+        <p class="c-note">ヒント: 広域はズーム 13、細部確認は 14 か 15 が安定します。</p>
+      </div>
     </div>
 
-    <div class="app-shell">
-        <aside class="control-panel">
-            <div class="panel-header">
-                <div>
-                    <p class="brand-eyebrow">National Terrain Workflow</p>
-                    <h1 class="brand-title">地形スタジオ<span>GSI Terrain Generator</span></h1>
-                </div>
-                <div id="status-pill" class="status-pill" data-state="idle">
-                    <span class="status-dot"></span>
-                    <span id="status-pill-text">待機中</span>
-                </div>
-            </div>
+    <main class="l-app-shell">
+      <section class="l-viewport" id="viewer-root" data-component="ViewerRoot" aria-label="3Dビュー"></section>
 
-            <p class="panel-description">
-                地名検索から地形生成、GLB書き出しまでを 1 画面で完結させる制作向けUIです。
-                まずは地点を決めて、必要な範囲と解像度に絞り込んでください。
-            </p>
+      <aside class="l-control-panel" data-component="ControlPanel">
+        <header class="c-panel-header">
+          <h1 class="c-brand-title c-brand-title--compact">TERRAIN<span>GSI 3D Studio</span></h1>
+          <div class="c-status-pill" data-component="StatusPill" data-state="splash">
+            <span class="c-status-dot" aria-hidden="true"></span>
+            <span data-component="StatusPillText">開始前</span>
+          </div>
+        </header>
 
-            <section class="section-card">
-                <div class="section-head">
-                    <h2 class="section-title">地点検索</h2>
-                    <span class="section-step">STEP 01</span>
-                </div>
+        <section class="c-panel" data-component="StatusBlock">
+          <h2 class="c-panel-title">現在の状態</h2>
+          <p class="c-status-main" data-component="StatusTitle">開始前です</p>
+          <p class="c-status-detail" data-component="StatusDetail">「作業を始める」を押すと設定パネルが有効になります。</p>
+        </section>
 
-                <label class="field-label" for="search-input">地名または施設名</label>
-                <div class="search-row">
-                    <input id="search-input" class="field-input" type="text" placeholder="例: 槍ヶ岳、箱根、伊豆大島">
-                    <button id="btn-search" class="inline-btn" type="button">検索</button>
-                </div>
+        <section class="c-panel">
+          <div class="c-panel-head">
+            <h2 class="c-panel-title">地点</h2>
+          </div>
+          <div class="c-search-row">
+            <input class="c-field" type="text" data-component="SearchInput" placeholder="例: 富士山、箱根、伊豆大島" />
+            <button class="c-button c-button--inline" type="button" data-action="search-location">検索</button>
+          </div>
+          <p class="c-helper" data-component="SearchStatus">地名を入力して中心点を設定してください。</p>
+          <div class="c-chip-row">
+            <button class="c-chip" type="button" data-action="quick-location" data-location="富士山" data-label="富士山周辺" data-lat="35.3606" data-lng="138.7273">富士山</button>
+            <button class="c-chip" type="button" data-action="quick-location" data-location="箱根" data-label="箱根エリア" data-lat="35.2323" data-lng="139.1069">箱根</button>
+            <button class="c-chip" type="button" data-action="quick-location" data-location="伊豆大島" data-label="伊豆大島エリア" data-lat="34.7448" data-lng="139.3602">伊豆大島</button>
+            <button class="c-chip" type="button" data-action="quick-location" data-location="白馬岳" data-label="白馬岳周辺" data-lat="36.7585" data-lng="137.7580">白馬岳</button>
+          </div>
+        </section>
 
-                <div class="quick-actions">
-                    <button class="chip-btn" type="button" data-location="富士山" data-label="富士山周辺" data-lat="35.3606" data-lng="138.7273">富士山</button>
-                    <button class="chip-btn" type="button" data-location="箱根" data-label="箱根エリア" data-lat="35.2323" data-lng="139.1069">箱根</button>
-                    <button class="chip-btn" type="button" data-location="伊豆大島" data-label="伊豆大島エリア" data-lat="34.7448" data-lng="139.3602">伊豆大島</button>
-                    <button class="chip-btn" type="button" data-location="白馬岳" data-label="白馬岳周辺" data-lat="36.7585" data-lng="137.7580">白馬岳</button>
-                </div>
+        <section class="c-panel">
+          <div class="c-panel-head">
+            <h2 class="c-panel-title">取得範囲</h2>
+          </div>
+          <div class="c-preset-row">
+            <button class="c-chip" type="button" data-action="apply-preset" data-preset="point">山頂 1km</button>
+            <button class="c-chip" type="button" data-action="apply-preset" data-preset="city">市街地 4km</button>
+            <button class="c-chip" type="button" data-action="apply-preset" data-preset="region">地域 10km</button>
+          </div>
+          <label class="c-range-label">幅 <span data-component="WidthValue">2.0 km</span></label>
+          <input type="range" min="0.5" max="15.0" step="0.1" value="2.0" data-component="WidthRange" />
+          <div class="c-lock-row">
+            <button class="c-icon-button is-active" type="button" data-action="toggle-ratio-lock" aria-label="縦横比を固定中">比率固定</button>
+            <span data-component="LockState">縦横比を固定中</span>
+          </div>
+          <label class="c-range-label">奥行 <span data-component="HeightValue">2.0 km</span></label>
+          <input type="range" min="0.5" max="15.0" step="0.1" value="2.0" data-component="HeightRange" />
+          <div class="c-summary-line">
+            <span>総面積</span>
+            <strong data-component="TotalArea">4.00 km²</strong>
+          </div>
+        </section>
 
-                <p id="search-status" class="helper-text" data-tone="muted" aria-live="polite">まずは地名検索かクイック選択で地点を決めてください。</p>
-            </section>
+        <section class="c-panel">
+          <div class="c-panel-head">
+            <h2 class="c-panel-title">生成設定</h2>
+          </div>
+          <div class="c-field-grid">
+            <label>ズーム
+              <select class="c-field" data-component="ZoomSelect">
+                <option value="12">12 | 軽量</option>
+                <option value="13">13 | 推奨</option>
+                <option value="14" selected>14 | 高精細</option>
+                <option value="15">15 | 超高精細</option>
+              </select>
+            </label>
+            <label>標高倍率
+              <input class="c-field" type="number" min="0.1" step="0.1" value="1.0" data-component="HeightScaleInput" />
+            </label>
+          </div>
+          <label class="c-toggle-row">
+            <span>航空写真テクスチャを使う</span>
+            <input type="checkbox" checked data-component="TextureToggle" />
+          </label>
+        </section>
 
-            <section class="section-card">
-                <div class="section-head">
-                    <h2 class="section-title">取得範囲</h2>
-                    <span class="section-step">STEP 02</span>
-                </div>
+        <section class="c-action-stack">
+          <button class="c-button c-button--primary" type="button" data-action="generate-terrain">地形を生成</button>
+          <div class="c-action-row">
+            <button class="c-button c-button--secondary" type="button" data-action="export-glb" disabled>GLBを書き出す</button>
+            <button class="c-button c-button--ghost" type="button" data-action="reset-camera" disabled>視点をリセット</button>
+          </div>
+        </section>
 
-                <div class="preset-grid">
-                    <button class="preset-btn" type="button" data-preset="point">山頂 1km</button>
-                    <button class="preset-btn" type="button" data-preset="city">都市 4km</button>
-                    <button class="preset-btn" type="button" data-preset="region">広域 10km</button>
-                </div>
+        <p class="c-footnote">データソース: 国土地理院 標高タイル / シームレス空中写真</p>
+      </aside>
 
-                <div class="range-group">
-                    <div class="range-top">
-                        <span>横幅</span>
-                        <span id="val-width" class="range-value">2.0 km</span>
-                    </div>
-                    <input id="area-width" type="range" min="0.5" max="15.0" step="0.1" value="2.0">
-                </div>
+      <aside class="l-info-rail" data-component="InfoRail" aria-label="生成結果サマリー">
+        <article class="c-summary-card">
+          <span>中心点</span>
+          <p data-component="SummaryCenter">35.3606, 138.7273</p>
+          <small data-component="SummaryPlace">富士山周辺</small>
+        </article>
+        <article class="c-summary-card">
+          <span>範囲と解像度</span>
+          <p data-component="SummaryArea">2.0 x 2.0 km</p>
+          <small data-component="SummaryResolution">ズーム 14</small>
+        </article>
+      </aside>
 
-                <div class="lock-row">
-                    <div class="lock-divider"></div>
-                    <button id="lock-btn" class="lock-btn active" type="button" aria-label="縦横比を固定">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                            <rect x="3" y="11" width="18" height="10" rx="2"></rect>
-                            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-                        </svg>
-                    </button>
-                    <span id="lock-state" class="lock-copy">縦横比を固定中</span>
-                    <div class="lock-divider"></div>
-                </div>
+      <aside class="l-hint" data-component="HintBlock">
+        <p>ドラッグ: 回転 / スクロール: 拡大縮小 / 右ドラッグ: 平行移動</p>
+      </aside>
+    </main>
 
-                <div class="range-group">
-                    <div class="range-top">
-                        <span>奥行き</span>
-                        <span id="val-height" class="range-value">2.0 km</span>
-                    </div>
-                    <input id="area-height" type="range" min="0.5" max="15.0" step="0.1" value="2.0">
-                </div>
-
-                <div class="summary-strip">
-                    <span class="helper-label">総面積</span>
-                    <span id="val-total" class="summary-chip summary-value">4.00 km²</span>
-                </div>
-            </section>
-
-            <section class="section-card">
-                <div class="section-head">
-                    <h2 class="section-title">表示と出力設定</h2>
-                    <span class="section-step">STEP 03</span>
-                </div>
-
-                <div class="config-grid">
-                    <div>
-                        <label class="field-label" for="zoom">ズームレベル</label>
-                        <select id="zoom" class="field-select">
-                            <option value="12">12 | 軽量</option>
-                            <option value="13">13 | 推奨</option>
-                            <option value="14" selected>14 | 高精細</option>
-                            <option value="15">15 | 超高精細</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label class="field-label" for="height-scale">高さ倍率</label>
-                        <input id="height-scale" class="field-number" type="number" min="0.1" step="0.1" value="1.0">
-                    </div>
-                </div>
-
-                <div class="toggle-row">
-                    <div>
-                        <span class="toggle-label">衛星写真テクスチャ</span>
-                        <span class="helper-text" style="margin-top:4px;">標高のみ確認したい場合はオフにできます。</span>
-                    </div>
-                    <input id="use-texture" class="toggle-check" type="checkbox" checked>
-                </div>
-            </section>
-
-            <section class="status-card">
-                <div class="status-head">
-                    <span class="section-step">Run State</span>
-                    <span id="status-time" class="metric-number">--:--</span>
-                </div>
-                <p id="status" class="status-main" role="status" aria-live="polite">待機中</p>
-                <p id="status-detail" class="status-detail">検索して地点を決め、必要な範囲とズームを選んだら 3D 地形を生成できます。</p>
-            </section>
-
-            <div class="action-stack">
-                <button id="btn-generate" class="primary-btn full-width" type="button">3D地形を生成</button>
-                <div class="action-row">
-                    <button id="btn-export" class="secondary-btn" type="button" disabled>GLBを書き出す</button>
-                    <button id="btn-reset-view" class="ghost-btn" type="button" disabled>視点を戻す</button>
-                </div>
-            </div>
-
-            <p class="panel-footer">データソース: 国土地理院 標高タイル / シームレス空中写真</p>
-
-            <input id="center-lat" type="hidden" value="35.3606">
-            <input id="center-lng" type="hidden" value="138.7273">
-        </aside>
-
-        <aside class="info-rail">
-            <section class="metric-grid">
-                <article class="metric-card">
-                    <span class="metric-label">中心座標</span>
-                    <p id="summary-center" class="metric-value metric-number">35.3606, 138.7273</p>
-                    <p id="summary-place" class="metric-meta">富士山周辺</p>
-                </article>
-
-                <article class="metric-card">
-                    <span class="metric-label">取得範囲</span>
-                    <p id="summary-area" class="metric-value metric-number">2.0 x 2.0 km</p>
-                    <p id="summary-resolution" class="metric-meta">ズーム 14</p>
-                </article>
-
-                <article class="metric-card">
-                    <span class="metric-label">マテリアル</span>
-                    <p id="summary-texture" class="metric-value">衛星写真あり</p>
-                    <p id="summary-scale" class="metric-meta">高さ倍率 1.0</p>
-                </article>
-            </section>
-
-            <section class="tips-card">
-                <span class="section-step">Feedback Loop</span>
-                <h2 class="tips-title">レビュー観点</h2>
-                <ul class="tips-list">
-                    <li>中心点が意図した地点になっているか。</li>
-                    <li>範囲とズームの組み合わせが重すぎないか。</li>
-                    <li>高さ倍率が用途に対して誇張されすぎていないか。</li>
-                    <li>GLB化する前にテクスチャの有無を決めたか。</li>
-                </ul>
-                <button id="btn-open-splash" class="ghost-btn full-width" type="button">使い方を再表示</button>
-            </section>
-        </aside>
-
-        <div class="viewport-hint">
-            <div class="hint-card">
-                <span class="section-step">Viewport</span>
-                <p>ドラッグで回転、ホイールでズーム、右ドラッグでパン。生成後は「視点を戻す」で全体を見直せます。</p>
-            </div>
-        </div>
-    </div>
-
-    <script type="module" src="./app.js"></script>
-</body>
+    <script type="module" src="/src/main.js"></script>
+  </body>
 </html>

@@ -1,0 +1,76 @@
+.c-button,
+.c-chip,
+.c-icon-button {
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  font-family: var(--font-accent);
+  letter-spacing: 0.04em;
+  transition: transform 0.15s ease, opacity 0.15s ease, border-color 0.15s ease;
+}
+
+.c-button,
+.c-chip { padding: 10px 14px; font-weight: 700; font-size: 12px; }
+
+.c-button--primary {
+  width: 100%;
+  border: 0;
+  background: #ffffff;
+  color: #000000;
+  padding: 14px;
+  font-weight: 900;
+}
+
+.c-button--secondary,
+.c-button--ghost,
+.c-button--inline,
+.c-chip,
+.c-icon-button {
+  border-color: rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+}
+
+.c-icon-button {
+  padding: 8px 10px;
+  font-size: 11px;
+}
+
+.c-icon-button.is-active {
+  border-color: rgba(105, 214, 234, 0.5);
+  background: rgba(105, 214, 234, 0.15);
+}
+
+.c-action-stack {
+  margin-top: 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.c-action-row {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.c-chip.is-active {
+  border-color: rgba(105, 214, 234, 0.45);
+  background: rgba(105, 214, 234, 0.15);
+}
+
+.c-button:disabled,
+.c-chip:disabled,
+.c-icon-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.c-button:hover,
+.c-chip:hover,
+.c-icon-button:hover {
+  transform: translateY(-1px);
+}
+
+@media (max-width: 680px) {
+  .c-action-row { grid-template-columns: 1fr; }
+}
