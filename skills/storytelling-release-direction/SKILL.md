@@ -8,7 +8,8 @@ description: Morimorimori のストーリーと哲学を軸に、主導線を守
 この Skill は、機能仕様の前に「何を成立させるプロダクトか」を固定するために使います。
 
 最初に `../../AGENTS.md` を読む。
-次に `../../docs/storytelling-release-playbook.md` と `../../docs/storytelling-copy-library.md` を参照する。
+次に `../../docs/storytelling-release-playbook.md` と `../../docs/storytelling-copy-library.md` と
+`../../docs/pm-release-operating-system.md` を参照する。
 
 ## この Skill の責任
 
@@ -16,6 +17,7 @@ description: Morimorimori のストーリーと哲学を軸に、主導線を守
 - 主導線を `地形生成 → 3Dモデルダウンロード` に固定する
 - 任意機能を主導線の後段へ分離する
 - 文言を「行動が成立する品質」へ引き上げる
+- 現在価値を壊さずに、次フェーズの期待を語る
 
 ## 判断の軸
 
@@ -23,14 +25,18 @@ description: Morimorimori のストーリーと哲学を軸に、主導線を守
 - その文言は現在地と次行動を伝えるか
 - その UI は主 CTA を一つに保っているか
 - その追加要素は折りたたみ哲学を壊していないか
+- 未来予告は主 CTA より弱い階層に収まっているか
 
 ## 出力で必ず含めること
 
 - このサービスが目指す状態
 - 体験の章立て
 - 主導線と任意導線の境界
+- 現在フェーズと次フェーズの接続文
 - 折りたたみ方針
+- 色味と UI 配置の方針
 - 章ごとの CTA と文言方針
+- 権限・責任と決裁ループ
 - リリース判断の指標
 - 今回見送るべき機能
 
