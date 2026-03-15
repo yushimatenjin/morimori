@@ -182,11 +182,12 @@ export class MapDataProvider {
     }
 
     const propagatedCount = this.propagateMissingHeights(heights, width, height);
+    const fallbackHeight = this.calculateFiniteMeanHeight(heights);
 
     let unresolvedCount = 0;
     for (let i = 0; i < heights.length; i += 1) {
       if (!Number.isFinite(heights[i])) {
-        heights[i] = 0;
+        heights[i] = fallbackHeight;
         unresolvedCount += 1;
       }
     }
@@ -196,6 +197,20 @@ export class MapDataProvider {
       propagatedCount,
       unresolvedCount
     };
+  }
+
+  calculateFiniteMeanHeight(heights) {
+    let sum = 0;
+    let count = 0;
+    for (let i = 0; i < heights.length; i += 1) {
+      const value = heights[i];
+      if (!Number.isFinite(value)) {
+        continue;
+      }
+      sum += value;
+      count += 1;
+    }
+    return count > 0 ? sum / count : 0;
   }
 
   propagateMissingHeights(heights, width, height) {
@@ -366,13 +381,13 @@ export class MapDataProvider {
       }
     }
 
-    const demResult = await this.loadDemTileWithFallback(tileX, tileY, zoom, demCtx, drawX, drawY, tileSize, photoBitmap);
+    const demResult = await this.loadDemTileWithFallback(tileX, tileY, zoom, demCtx, drawX, drawY, tileSize);
     photoBitmap?.close();
 
     return demResult;
   }
 
-  async loadDemTileWithFallback(tileX, tileY, zoom, demCtx, drawX, drawY, tileSize, photoBitmap = null) {
+  async loadDemTileWithFallback(tileX, tileY, zoom, demCtx, drawX, drawY, tileSize) {
     let firstRequestedUrl = null;
     const sources = zoom >= 15 ? DEM_SOURCES_HIGH_ZOOM : DEM_SOURCES_STANDARD;
 
@@ -402,14 +417,6 @@ export class MapDataProvider {
       }
     }
 
-    if (photoBitmap) {
-      this.drawPseudoDemFromPhoto(photoBitmap, demCtx, drawX, drawY, tileSize);
-      return {
-        demMissing: true,
-        requestedDemUrl: firstRequestedUrl
-      };
-    }
-
     demCtx.fillStyle = DEM_NO_DATA_FILL_STYLE;
     demCtx.fillRect(drawX, drawY, tileSize, tileSize);
 
@@ -432,36 +439,4 @@ export class MapDataProvider {
     }
   }
 
-  drawPseudoDemFromPhoto(photoBitmap, demCtx, drawX, drawY, tileSize) {
-    const sampleCanvas = document.createElement("canvas");
-    sampleCanvas.width = 256;
-    sampleCanvas.height = 256;
-    const sampleCtx = sampleCanvas.getContext("2d");
-    if (!sampleCtx) {
-      demCtx.fillStyle = DEM_NO_DATA_FILL_STYLE;
-      demCtx.fillRect(drawX, drawY, tileSize, tileSize);
-      return;
-    }
-
-    sampleCtx.drawImage(photoBitmap, 0, 0, 256, 256);
-    const imageData = sampleCtx.getImageData(0, 0, 256, 256);
-    const pixels = imageData.data;
-
-    // 写真の明度から疑似標高を生成して、DEM欠損地点でも最低限の起伏を確保する
-    for (let i = 0; i < pixels.length; i += 4) {
-      const r = pixels[i];
-      const g = pixels[i + 1];
-      const b = pixels[i + 2];
-      const luma = 0.299 * r + 0.587 * g + 0.114 * b;
-      const pseudoMeters = 8 + (luma / 255) * 220;
-      const demValue = Math.max(0, Math.round(pseudoMeters * 100));
-      pixels[i] = (demValue >> 16) & 255;
-      pixels[i + 1] = (demValue >> 8) & 255;
-      pixels[i + 2] = demValue & 255;
-      pixels[i + 3] = 255;
-    }
-
-    sampleCtx.putImageData(imageData, 0, 0);
-    demCtx.drawImage(sampleCanvas, drawX, drawY, tileSize, tileSize);
-  }
 }
