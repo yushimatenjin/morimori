@@ -187,10 +187,16 @@ export class TerrainViewer {
     let maxHeight = Number.NEGATIVE_INFINITY;
 
     for (let i = 0; i < data.heights.length; i += 1) {
-      const height = data.heights[i];
+      const rawHeight = data.heights[i];
+      const height = Number.isFinite(rawHeight) ? rawHeight : 0;
       positions[i * 3 + 1] = height;
       minHeight = Math.min(minHeight, height);
       maxHeight = Math.max(maxHeight, height);
+    }
+
+    if (!Number.isFinite(minHeight) || !Number.isFinite(maxHeight)) {
+      minHeight = 0;
+      maxHeight = 0;
     }
 
     geometry.computeVertexNormals();

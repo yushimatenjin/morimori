@@ -7,8 +7,10 @@ const DEM_SOURCES_HIGH_ZOOM = ["dem5a_png", "dem5b_png", "dem_png"];
 const DEM_SOURCES_STANDARD = ["dem_png"];
 const PHOTO_FALLBACK_COLOR = "#0f2236";
 const DEM_NO_DATA_VALUE = 8388608;
+const DEM_NO_DATA_FILL_STYLE = "rgb(128, 0, 0)";
 const DEM_MIN_ELEVATION_M = -200;
 const DEM_MAX_ELEVATION_M = 4500;
+const DEM_SPIKE_THRESHOLD_M = 1200;
 
 export class MapDataProvider {
   constructor() {
@@ -87,20 +89,25 @@ export class MapDataProvider {
       const r = demData[i * 4];
       const g = demData[i * 4 + 1];
       const b = demData[i * 4 + 2];
+      const a = demData[i * 4 + 3];
       const value = r * 65536 + g * 256 + b;
-      if (value === DEM_NO_DATA_VALUE) {
-        heights[i] = 0;
+      if (a === 0 || value === DEM_NO_DATA_VALUE) {
+        heights[i] = Number.NaN;
         invalidHeightCount += 1;
         continue;
       }
 
       const rawHeight = value < DEM_NO_DATA_VALUE ? value * 0.01 : (value - 16777216) * 0.01;
       const clamped = Math.min(DEM_MAX_ELEVATION_M, Math.max(DEM_MIN_ELEVATION_M, rawHeight));
-      if (clamped !== rawHeight) {
+      if (!Number.isFinite(clamped) || clamped !== rawHeight) {
         invalidHeightCount += 1;
       }
-      heights[i] = clamped;
+      heights[i] = Number.isFinite(clamped) ? clamped : Number.NaN;
     }
+
+    const { interpolatedCount, unresolvedCount } = this.repairMissingHeights(heights, demCanvas.width, demCanvas.height);
+    const spikeCorrectedCount = this.suppressSpikeOutliers(heights, demCanvas.width, demCanvas.height);
+    invalidHeightCount += unresolvedCount;
 
     return {
       heights,
@@ -116,9 +123,123 @@ export class MapDataProvider {
       diagnostics: {
         demMissingCount: demDiagnostics.missingCount,
         demMissingSamples: demDiagnostics.missingSamples,
-        invalidHeightCount
+        invalidHeightCount,
+        interpolatedCount,
+        spikeCorrectedCount
       }
     };
+  }
+
+  repairMissingHeights(heights, width, height) {
+    let interpolatedCount = 0;
+
+    for (let pass = 0; pass < 4; pass += 1) {
+      let passChanges = 0;
+      const next = new Float32Array(heights);
+
+      for (let y = 1; y < height - 1; y += 1) {
+        for (let x = 1; x < width - 1; x += 1) {
+          const index = y * width + x;
+          if (Number.isFinite(heights[index])) {
+            continue;
+          }
+
+          let sum = 0;
+          let count = 0;
+          for (let oy = -1; oy <= 1; oy += 1) {
+            for (let ox = -1; ox <= 1; ox += 1) {
+              if (ox === 0 && oy === 0) {
+                continue;
+              }
+              const neighbor = heights[(y + oy) * width + (x + ox)];
+              if (Number.isFinite(neighbor)) {
+                sum += neighbor;
+                count += 1;
+              }
+            }
+          }
+
+          if (count >= 2) {
+            next[index] = sum / count;
+            passChanges += 1;
+          }
+        }
+      }
+
+      if (passChanges === 0) {
+        break;
+      }
+
+      heights.set(next);
+      interpolatedCount += passChanges;
+    }
+
+    let unresolvedCount = 0;
+    for (let i = 0; i < heights.length; i += 1) {
+      if (!Number.isFinite(heights[i])) {
+        heights[i] = 0;
+        unresolvedCount += 1;
+      }
+    }
+
+    return {
+      interpolatedCount,
+      unresolvedCount
+    };
+  }
+
+  suppressSpikeOutliers(heights, width, height) {
+    let correctedCount = 0;
+    const neighbors = new Array(8);
+
+    for (let y = 1; y < height - 1; y += 1) {
+      for (let x = 1; x < width - 1; x += 1) {
+        const index = y * width + x;
+        const center = heights[index];
+        if (!Number.isFinite(center)) {
+          continue;
+        }
+
+        let n = 0;
+        for (let oy = -1; oy <= 1; oy += 1) {
+          for (let ox = -1; ox <= 1; ox += 1) {
+            if (ox === 0 && oy === 0) {
+              continue;
+            }
+            const value = heights[(y + oy) * width + (x + ox)];
+            if (Number.isFinite(value)) {
+              neighbors[n] = value;
+              n += 1;
+            }
+          }
+        }
+
+        if (n < 6) {
+          continue;
+        }
+
+        const sorted = neighbors.slice(0, n).sort((a, b) => a - b);
+        const median = sorted[Math.floor(n / 2)];
+        const delta = Math.abs(center - median);
+        if (delta < DEM_SPIKE_THRESHOLD_M) {
+          continue;
+        }
+
+        let mismatchCount = 0;
+        for (let i = 0; i < n; i += 1) {
+          if (Math.abs(center - neighbors[i]) >= DEM_SPIKE_THRESHOLD_M * 0.75) {
+            mismatchCount += 1;
+          }
+        }
+
+        if (mismatchCount >= 6) {
+          heights[index] = median;
+          correctedCount += 1;
+        }
+      }
+    }
+
+    return correctedCount;
   }
 
   estimateTileCoverage(bounds, zoom) {
@@ -200,7 +321,7 @@ export class MapDataProvider {
       };
     }
 
-    demCtx.fillStyle = "#000000";
+    demCtx.fillStyle = DEM_NO_DATA_FILL_STYLE;
     demCtx.fillRect(drawX, drawY, tileSize, tileSize);
 
     return {
@@ -228,7 +349,7 @@ export class MapDataProvider {
     sampleCanvas.height = 256;
     const sampleCtx = sampleCanvas.getContext("2d");
     if (!sampleCtx) {
-      demCtx.fillStyle = "#000000";
+      demCtx.fillStyle = DEM_NO_DATA_FILL_STYLE;
       demCtx.fillRect(drawX, drawY, tileSize, tileSize);
       return;
     }
