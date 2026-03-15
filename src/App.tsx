@@ -12,8 +12,11 @@ type TerrainViewerLike = {
   startViewpointPick: (onPicked: (point: WorldPoint) => void) => void;
   applyAtmosphere: (params: { skyPreset: string; timePreset: string }) => void;
   enterStreetView: (point: WorldPoint, eyeHeight: number) => void;
+  exitStreetView: () => void;
   resetView: () => void;
   setSkyboxVisible: (visible: boolean) => void;
+  setStreetViewFov: (fov: number) => void;
+  setStreetViewEyeHeight: (eyeHeight: number) => void;
 };
 
 type MapDataProviderLike = {
@@ -120,6 +123,24 @@ const DEFAULT_TERRAIN: Terrain = {
   zoom: 12
 };
 const INITIAL_PLACEMENT_GUIDE = "生成後に任意で視点ポイントを置き、人間視点の360°確認へ進めます。";
+
+function clampNumber(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function sanitizeFov(value: number) {
+  if (!Number.isFinite(value)) {
+    return 55;
+  }
+  return Math.round(clampNumber(value, 20, 120));
+}
+
+function sanitizeEyeHeight(value: number) {
+  if (!Number.isFinite(value)) {
+    return 1.6;
+  }
+  return Number(clampNumber(value, 1.2, 2.2).toFixed(1));
+}
 
 function getErrorMessage(error: unknown) {
   if (error instanceof Error) {
@@ -288,6 +309,7 @@ export function App() {
   const [cameraFov, setCameraFov] = useState(55);
   const [eyeHeight, setEyeHeight] = useState(1.6);
   const [timePreset, setTimePreset] = useState("day");
+  const [isStreetViewActive, setIsStreetViewActive] = useState(false);
 
   const vm = phaseViewModel[phase] || phaseViewModel[AppPhase.IDLE];
   const statusDetail = detailOverride ?? vm.detail;
@@ -336,6 +358,28 @@ export function App() {
     document.body.dataset.state = phase;
   }, [phase]);
 
+  useEffect(() => {
+    if (!isStreetViewActive) return;
+    viewerRef.current?.setStreetViewFov(cameraFov);
+  }, [cameraFov, isStreetViewActive]);
+
+  useEffect(() => {
+    if (!isStreetViewActive) return;
+    viewerRef.current?.setStreetViewEyeHeight(eyeHeight);
+  }, [eyeHeight, isStreetViewActive]);
+
+  useEffect(() => {
+    if (!isStreetViewActive) return;
+    viewerRef.current?.applyAtmosphere({ skyPreset: "clear", timePreset });
+  }, [isStreetViewActive, timePreset]);
+
+  useEffect(() => {
+    if (phase === AppPhase.GENERATED || !isStreetViewActive) return;
+    viewerRef.current?.exitStreetView();
+    viewerRef.current?.setSkyboxVisible(false);
+    setIsStreetViewActive(false);
+  }, [isStreetViewActive, phase]);
+
   function setErrorState(nextError: ErrorInfo) {
     setErrorInfo(nextError);
     setDetailOverride(formatErrorDetail(nextError));
@@ -364,6 +408,7 @@ export function App() {
   }
 
   function openWorkspace() {
+    viewerRef.current?.exitStreetView();
     viewerRef.current?.setSkyboxVisible(false);
     setShowSplash(false);
     setPhase(AppPhase.IDLE);
@@ -385,6 +430,7 @@ export function App() {
     setShowOptionalFinishing(false);
     setSelectedViewpoint(null);
     setPlacementGuide(INITIAL_PLACEMENT_GUIDE);
+    setIsStreetViewActive(false);
   }
 
   function setCenterPoint(nextCenter: Center, query?: string) {
@@ -672,7 +718,9 @@ export function App() {
       return;
     }
 
+    viewer.exitStreetView();
     viewer.setSkyboxVisible(false);
+    setIsStreetViewActive(false);
 
     setBusy(true);
     setLoadingVisible(true);
@@ -726,6 +774,7 @@ export function App() {
       setShowOptionalFinishing(false);
       setSelectedViewpoint(null);
       setPlacementGuide(INITIAL_PLACEMENT_GUIDE);
+      setIsStreetViewActive(false);
       setPhase(AppPhase.GENERATED);
 
       const missingCount = data?.diagnostics?.demMissingCount ?? 0;
@@ -847,14 +896,21 @@ export function App() {
       return;
     }
 
+    viewer.setSkyboxVisible(false);
+
+    if (isStreetViewActive) {
+      viewer.exitStreetView();
+      viewer.setSkyboxVisible(false);
+      setIsStreetViewActive(false);
+    }
+
     viewer.startViewpointPick((point) => {
       setSelectedViewpoint(point);
-      viewer.setSkyboxVisible(true);
-      setPlacementGuide(`視点ポイントを指定しました: ${formatWorldPoint(point)} / 次に「人間視点で360°表示」を実行してください。`);
-      setStatusMessage("視点ポイントを指定しました。360°確認に進めます。");
+      setPlacementGuide(`視点ポイントを指定しました: ${formatWorldPoint(point)} / 次に「StreetViewを開始」を実行してください。`);
+      setStatusMessage("視点ポイントを指定しました。StreetView確認に進めます。");
     });
 
-    setPlacementGuide("地形上をクリックして視点ポイントを指定してください。");
+    setPlacementGuide("地形上をクリックして視点ポイントを指定してください（この段階ではSkyboxは表示しません）。");
     setStatusMessage("視点ポイント指定モードです。地形上をクリックしてください。");
   }
 
@@ -871,14 +927,41 @@ export function App() {
       return;
     }
 
-    viewer.camera.fov = Math.min(120, Math.max(20, cameraFov));
-    viewer.camera.updateProjectionMatrix();
+    const sanitizedFov = sanitizeFov(cameraFov);
+    const sanitizedEyeHeight = sanitizeEyeHeight(eyeHeight);
+    setCameraFov(sanitizedFov);
+    setEyeHeight(sanitizedEyeHeight);
+    viewer.setStreetViewFov(sanitizedFov);
+    viewer.setStreetViewEyeHeight(sanitizedEyeHeight);
     viewer.applyAtmosphere({ skyPreset: "clear", timePreset });
     viewer.setSkyboxVisible(true);
-    viewer.enterStreetView(selectedViewpoint, eyeHeight);
+    viewer.enterStreetView(selectedViewpoint, sanitizedEyeHeight);
+    setIsStreetViewActive(true);
 
-    setStatusMessage("人間視点で360°確認中です。ドラッグで周囲を確認できます。");
-    setPlacementGuide(`視点高さ ${eyeHeight.toFixed(1)}m / ドラッグで360°確認できます。`);
+    setStatusMessage("StreetView確認中です。ドラッグで周囲を見回せます。");
+    setPlacementGuide(`視点高さ ${sanitizedEyeHeight.toFixed(1)}m / ドラッグで360°確認できます。終了時は「StreetViewを終了」を押してください。`);
+  }
+
+  function exitStreetViewMode() {
+    const viewer = viewerRef.current;
+    if (!viewer?.currentMesh) {
+      setIsStreetViewActive(false);
+      return;
+    }
+
+    viewer.exitStreetView();
+    viewer.setSkyboxVisible(false);
+    viewer.resetView();
+    setIsStreetViewActive(false);
+    setStatusMessage("StreetView表示を終了し、俯瞰視点に戻しました。");
+    setPlacementGuide("必要なら視点ポイントを再指定して、再度StreetViewを開始してください。");
+  }
+
+  function toggleOptionalFinishing() {
+    if (showOptionalFinishing && isStreetViewActive) {
+      exitStreetViewMode();
+    }
+    setShowOptionalFinishing((prev) => !prev);
   }
 
   function onPrimaryAction() {
@@ -1159,11 +1242,11 @@ export function App() {
           {showFinishingSection ? (
             <section className="c-panel c-step" data-component="OptionalFinishingSection" data-journey="optional" data-step="4">
               <div className="c-optional-header">
-                <h2 className="c-step__title">仕上げ（任意）: 視点調整</h2>
+                <h2 className="c-step__title">仕上げ（任意）: StreetView確認</h2>
                 <button
                   className="c-button c-button--ghost"
                   data-action="toggle-finishing-options"
-                  onClick={() => setShowOptionalFinishing((prev) => !prev)}
+                  onClick={toggleOptionalFinishing}
                   type="button"
                 >
                   {showOptionalFinishing ? "閉じる" : "開く"}
@@ -1172,6 +1255,7 @@ export function App() {
 
               {showOptionalFinishing ? (
                 <>
+                  <p className="c-inline-note">地形上の視点から、ドラッグで360°確認できます。終了時は「StreetViewを終了」を押してください。</p>
                   <div className="c-form-grid">
                     <label className="c-field">
                       <span>FOV（度）</span>
@@ -1180,7 +1264,7 @@ export function App() {
                         data-component="CameraFov"
                         max={120}
                         min={20}
-                        onChange={(event) => setCameraFov(Number(event.target.value || 55))}
+                        onChange={(event) => setCameraFov(sanitizeFov(Number(event.target.value || 55)))}
                         step={1}
                         type="number"
                         value={cameraFov}
@@ -1192,9 +1276,9 @@ export function App() {
                       <input
                         className="c-input"
                         data-component="EyeHeight"
-                        max={3}
-                        min={1}
-                        onChange={(event) => setEyeHeight(Number(event.target.value || 1.6))}
+                        max={2.2}
+                        min={1.2}
+                        onChange={(event) => setEyeHeight(sanitizeEyeHeight(Number(event.target.value || 1.6)))}
                         step={0.1}
                         type="number"
                         value={eyeHeight}
@@ -1215,8 +1299,13 @@ export function App() {
                     <button className="c-button c-button--secondary" data-action="pick-viewpoint" onClick={pickViewpointOnTerrain} type="button">
                       視点ポイントを指定
                     </button>
-                    <button className="c-button c-button--outline" data-action="open-street-view" onClick={showStreetViewMode} type="button">
-                      人間視点で360°表示
+                    <button
+                      className="c-button c-button--outline"
+                      data-action={isStreetViewActive ? "exit-street-view" : "open-street-view"}
+                      onClick={isStreetViewActive ? exitStreetViewMode : showStreetViewMode}
+                      type="button"
+                    >
+                      {isStreetViewActive ? "StreetViewを終了" : "StreetViewを開始（360°）"}
                     </button>
                   </div>
 

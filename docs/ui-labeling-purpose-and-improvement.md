@@ -17,7 +17,7 @@
 | ステップ1 | LocationStepSection | `LocationStepSection` | 地点を決める（入力 or 地図） |
 | ステップ2 | GenerationStepSection | `GenerationStepSection` | 範囲・条件で地形を作る |
 | ステップ3 | ExportStepSection | `ExportStepSection` | 生成結果を保存して持ち出す |
-| 任意 | OptionalFinishingSection | `OptionalFinishingSection` | 保存後の仕上げ確認 |
+| 任意 | OptionalFinishingSection | `OptionalFinishingSection` | 保存後のStreetView確認 |
 | ビュー | ViewerRoot | `ViewerRoot` | 3D地形の確認 |
 | 要約 | SummaryCard(中心) | カード | 中心地点を固定表示 |
 | 要約 | SummaryCard(範囲) | カード | 範囲と解像度を固定表示 |
@@ -53,8 +53,9 @@
 | 地形を再生成 | `generate-terrain` | 副 | 条件調整後の再生成 |
 | 視点を戻す | `reset-camera` | 副（任意） | カメラを初期視点へ戻す |
 | 開く/閉じる（仕上げ） | `toggle-finishing-options` | 副（任意） | 任意機能の展開・収納 |
-| 視点ポイントを地形上で指定 | `apply-viewpoint` | 副（任意） | 視点指定モードに入る |
-| 人間視点で360°表示 | `show-placement-guide` | 副（任意） | 視点指定後の確認へ進む |
+| 視点ポイントを地形上で指定 | `pick-viewpoint` | 副（任意） | 視点指定モードに入る |
+| StreetViewを開始（360°） | `open-street-view` | 副（任意） | 視点指定後の確認へ進む |
+| StreetViewを終了 | `exit-street-view` | 副（任意） | 俯瞰視点へ戻る |
 
 ## 4. 状態遷移での意味づけ
 
@@ -100,4 +101,3 @@
 1. `regenerate-terrain` を新設して `data-action` の意味衝突を解消する。
 2. `generated` 状態時の保存CTAを視覚的に最強化する。
 3. 結合テスト表の主要ケースをPlaywrightスクリプトとして固定化する。
-

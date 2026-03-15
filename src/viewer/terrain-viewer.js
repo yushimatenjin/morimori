@@ -25,6 +25,7 @@ export class TerrainViewer {
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
 
     this.container.appendChild(this.renderer.domElement);
+    this.renderer.domElement.style.cursor = "default";
 
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
@@ -40,6 +41,8 @@ export class TerrainViewer {
     this.viewpointMarker = null;
     this.skyDome = null;
     this.skyboxVisible = false;
+    this.streetViewPoint = null;
+    this.streetViewEyeHeight = 1.6;
     this.streetViewState = {
       yaw: 0,
       pitch: 0,
@@ -106,6 +109,18 @@ export class TerrainViewer {
     this.skyboxVisible = Boolean(visible);
     if (this.skyDome) {
       this.skyDome.visible = this.skyboxVisible;
+    }
+  }
+
+  setStreetViewFov(fov) {
+    this.camera.fov = THREE.MathUtils.clamp(fov, 20, 120);
+    this.camera.updateProjectionMatrix();
+  }
+
+  setStreetViewEyeHeight(eyeHeight) {
+    this.streetViewEyeHeight = THREE.MathUtils.clamp(eyeHeight, 1.2, 2.2);
+    if (this.isStreetViewMode) {
+      this.updateStreetViewPosition();
     }
   }
 
@@ -279,16 +294,29 @@ export class TerrainViewer {
       return;
     }
 
-    const eyePos = point.clone();
-    eyePos.y += THREE.MathUtils.clamp(eyeHeight, 1.2, 2.2);
+    const wasStreetViewMode = this.isStreetViewMode;
+    this.streetViewPoint = point.clone();
+    this.streetViewEyeHeight = THREE.MathUtils.clamp(eyeHeight, 1.2, 2.2);
 
     this.isStreetViewMode = true;
     this.controls.enabled = false;
-    this.camera.position.copy(eyePos);
+    this.updateStreetViewPosition();
 
-    this.streetViewState.yaw = 0;
-    this.streetViewState.pitch = 0;
+    if (!wasStreetViewMode) {
+      this.streetViewState.yaw = 0;
+      this.streetViewState.pitch = 0;
+    }
     this.updateStreetViewCameraDirection();
+    this.renderer.domElement.style.cursor = "grab";
+  }
+
+  updateStreetViewPosition() {
+    if (!this.streetViewPoint) {
+      return;
+    }
+    const eyePos = this.streetViewPoint.clone();
+    eyePos.y += this.streetViewEyeHeight;
+    this.camera.position.copy(eyePos);
   }
 
   updateStreetViewCameraDirection() {
@@ -303,6 +331,7 @@ export class TerrainViewer {
     this.streetViewState.dragging = true;
     this.streetViewState.lastX = event.clientX;
     this.streetViewState.lastY = event.clientY;
+    this.renderer.domElement.style.cursor = "grabbing";
   }
 
   handleStreetViewDragMove(event) {
@@ -324,12 +353,14 @@ export class TerrainViewer {
 
   handleStreetViewDragEnd() {
     this.streetViewState.dragging = false;
+    this.renderer.domElement.style.cursor = this.isStreetViewMode ? "grab" : "default";
   }
 
   exitStreetView() {
     this.isStreetViewMode = false;
     this.streetViewState.dragging = false;
     this.controls.enabled = true;
+    this.renderer.domElement.style.cursor = "default";
   }
 
   toWorldPosition(lat, lng, altitude = 0) {
