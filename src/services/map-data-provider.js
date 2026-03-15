@@ -5,6 +5,10 @@ export const MAX_TILE_COUNT = 1000;
 const MAX_DEM_PIXELS = 1_500_000;
 const DEM_SOURCES_HIGH_ZOOM = ["dem5a_png", "dem5b_png", "dem_png"];
 const DEM_SOURCES_STANDARD = ["dem_png"];
+const PHOTO_FALLBACK_COLOR = "#0f2236";
+const DEM_NO_DATA_VALUE = 8388608;
+const DEM_MIN_ELEVATION_M = -200;
+const DEM_MAX_ELEVATION_M = 4500;
 
 export class MapDataProvider {
   constructor() {
@@ -78,12 +82,24 @@ export class MapDataProvider {
     const demData = demCtx.getImageData(0, 0, demCanvas.width, demCanvas.height).data;
     const heights = new Float32Array(demData.length / 4);
 
+    let invalidHeightCount = 0;
     for (let i = 0; i < heights.length; i += 1) {
       const r = demData[i * 4];
       const g = demData[i * 4 + 1];
       const b = demData[i * 4 + 2];
       const value = r * 65536 + g * 256 + b;
-      heights[i] = value < 8388608 ? value * 0.01 : (value - 16777216) * 0.01;
+      if (value === DEM_NO_DATA_VALUE) {
+        heights[i] = 0;
+        invalidHeightCount += 1;
+        continue;
+      }
+
+      const rawHeight = value < DEM_NO_DATA_VALUE ? value * 0.01 : (value - 16777216) * 0.01;
+      const clamped = Math.min(DEM_MAX_ELEVATION_M, Math.max(DEM_MIN_ELEVATION_M, rawHeight));
+      if (clamped !== rawHeight) {
+        invalidHeightCount += 1;
+      }
+      heights[i] = clamped;
     }
 
     return {
@@ -99,7 +115,8 @@ export class MapDataProvider {
       },
       diagnostics: {
         demMissingCount: demDiagnostics.missingCount,
-        demMissingSamples: demDiagnostics.missingSamples
+        demMissingSamples: demDiagnostics.missingSamples,
+        invalidHeightCount
       }
     };
   }
@@ -128,33 +145,24 @@ export class MapDataProvider {
     const drawX = offsetX * tileSize;
     const drawY = offsetY * tileSize;
 
-    const loadImage = (url, ctx, fallbackColor) =>
-      new Promise((resolve) => {
-        const image = new Image();
-        image.crossOrigin = "anonymous";
-        image.onload = () => {
-          if (ctx) {
-            ctx.drawImage(image, drawX, drawY, tileSize, tileSize);
-          }
-          resolve();
-        };
-        image.onerror = () => {
-          if (ctx) {
-            ctx.fillStyle = fallbackColor;
-            ctx.fillRect(drawX, drawY, tileSize, tileSize);
-          }
-          resolve();
-        };
-        image.src = url;
-      });
+    const photoBitmap = await this.fetchImageBitmap(`${this.photoUrl}/${zoom}/${tileX}/${tileY}.jpg`);
 
-    const demResult = await this.loadDemTileWithFallback(tileX, tileY, zoom, demCtx, drawX, drawY, tileSize);
-    await (photoCtx ? loadImage(`${this.photoUrl}/${zoom}/${tileX}/${tileY}.jpg`, photoCtx, "#0f2236") : Promise.resolve());
+    if (photoCtx) {
+      if (photoBitmap) {
+        photoCtx.drawImage(photoBitmap, drawX, drawY, tileSize, tileSize);
+      } else {
+        photoCtx.fillStyle = PHOTO_FALLBACK_COLOR;
+        photoCtx.fillRect(drawX, drawY, tileSize, tileSize);
+      }
+    }
+
+    const demResult = await this.loadDemTileWithFallback(tileX, tileY, zoom, demCtx, drawX, drawY, tileSize, photoBitmap);
+    photoBitmap?.close();
 
     return demResult;
   }
 
-  async loadDemTileWithFallback(tileX, tileY, zoom, demCtx, drawX, drawY, tileSize) {
+  async loadDemTileWithFallback(tileX, tileY, zoom, demCtx, drawX, drawY, tileSize, photoBitmap = null) {
     let firstRequestedUrl = null;
     const sources = zoom >= 15 ? DEM_SOURCES_HIGH_ZOOM : DEM_SOURCES_STANDARD;
 
@@ -184,6 +192,14 @@ export class MapDataProvider {
       }
     }
 
+    if (photoBitmap) {
+      this.drawPseudoDemFromPhoto(photoBitmap, demCtx, drawX, drawY, tileSize);
+      return {
+        demMissing: true,
+        requestedDemUrl: firstRequestedUrl
+      };
+    }
+
     demCtx.fillStyle = "#000000";
     demCtx.fillRect(drawX, drawY, tileSize, tileSize);
 
@@ -191,5 +207,51 @@ export class MapDataProvider {
       demMissing: true,
       requestedDemUrl: firstRequestedUrl
     };
+  }
+
+  async fetchImageBitmap(url) {
+    try {
+      const response = await fetch(url, { cache: "force-cache" });
+      if (!response.ok) {
+        return null;
+      }
+      const blob = await response.blob();
+      return await createImageBitmap(blob);
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  drawPseudoDemFromPhoto(photoBitmap, demCtx, drawX, drawY, tileSize) {
+    const sampleCanvas = document.createElement("canvas");
+    sampleCanvas.width = 256;
+    sampleCanvas.height = 256;
+    const sampleCtx = sampleCanvas.getContext("2d");
+    if (!sampleCtx) {
+      demCtx.fillStyle = "#000000";
+      demCtx.fillRect(drawX, drawY, tileSize, tileSize);
+      return;
+    }
+
+    sampleCtx.drawImage(photoBitmap, 0, 0, 256, 256);
+    const imageData = sampleCtx.getImageData(0, 0, 256, 256);
+    const pixels = imageData.data;
+
+    // 写真の明度から疑似標高を生成して、DEM欠損地点でも最低限の起伏を確保する
+    for (let i = 0; i < pixels.length; i += 4) {
+      const r = pixels[i];
+      const g = pixels[i + 1];
+      const b = pixels[i + 2];
+      const luma = 0.299 * r + 0.587 * g + 0.114 * b;
+      const pseudoMeters = 8 + (luma / 255) * 220;
+      const demValue = Math.max(0, Math.round(pseudoMeters * 100));
+      pixels[i] = (demValue >> 16) & 255;
+      pixels[i + 1] = (demValue >> 8) & 255;
+      pixels[i + 2] = demValue & 255;
+      pixels[i + 3] = 255;
+    }
+
+    sampleCtx.putImageData(imageData, 0, 0);
+    demCtx.drawImage(sampleCanvas, drawX, drawY, tileSize, tileSize);
   }
 }

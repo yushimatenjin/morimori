@@ -38,6 +38,7 @@ export class TerrainViewer {
     this.pickCallback = null;
     this.isStreetViewMode = false;
     this.viewpointMarker = null;
+    this.skyDome = null;
     this.streetViewState = {
       yaw: 0,
       pitch: 0,
@@ -56,6 +57,7 @@ export class TerrainViewer {
     window.addEventListener("mouseup", () => this.handleStreetViewDragEnd());
 
     this.initEnvironment();
+    this.initSkybox();
     this.onResize();
     window.addEventListener("resize", () => this.onResize());
     this.animate();
@@ -70,6 +72,32 @@ export class TerrainViewer {
     this.scene.add(this.hemiLight, this.dirLight, this.ambientLight);
 
     this.applyAtmosphere({ skyPreset: "clear", timePreset: "day" });
+  }
+
+  initSkybox() {
+    const loader = new THREE.TextureLoader();
+    loader.load(
+      "/skybox.jpg",
+      (texture) => {
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
+
+        const geometry = new THREE.SphereGeometry(950000, 40, 28);
+        const material = new THREE.MeshBasicMaterial({
+          map: texture,
+          side: THREE.BackSide,
+          depthWrite: false,
+          fog: false
+        });
+
+        this.skyDome = new THREE.Mesh(geometry, material);
+        this.scene.add(this.skyDome);
+      },
+      undefined,
+      () => {
+        // 画像読み込みに失敗した場合は既存の背景表現を維持する
+      }
+    );
   }
 
   disposeCurrentMesh() {
