@@ -129,3 +129,6 @@ OGP説明:
 OGP画像代替テキスト:
 - Morimorimori 背景地形制作ワークスペースの山岳地形プレビュー
 
+OGP画像ファイル:
+- `public/ogp.png`（1200x630）
+
