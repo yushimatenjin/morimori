@@ -3,10 +3,12 @@ import { GeoUtils } from "../lib/geo-utils.js";
 
 export const MAX_TILE_COUNT = 1000;
 const MAX_DEM_PIXELS = 1_500_000;
+const DEM_SOURCES_HIGH_ZOOM = ["dem5a_png", "dem5b_png", "dem_png"];
+const DEM_SOURCES_STANDARD = ["dem_png"];
 
 export class MapDataProvider {
   constructor() {
-    this.demUrl = "https://cyberjapandata.gsi.go.jp/xyz/dem_png";
+    this.demBaseUrl = "https://cyberjapandata.gsi.go.jp/xyz";
     this.photoUrl = "https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto";
   }
 
@@ -48,12 +50,22 @@ export class MapDataProvider {
     onProgress({ loaded: 0, total: totalTiles });
 
     let loadedTiles = 0;
+    const demDiagnostics = {
+      missingCount: 0,
+      missingSamples: []
+    };
     const tilePromises = [];
 
     for (let y = 0; y < countY; y += 1) {
       for (let x = 0; x < countX; x += 1) {
         tilePromises.push(
-          this.loadTile(startX + x, startY + y, zoom, x, y, demCtx, photoCtx, downsample).then(() => {
+          this.loadTile(startX + x, startY + y, zoom, x, y, demCtx, photoCtx, downsample).then((tileResult) => {
+            if (tileResult?.demMissing) {
+              demDiagnostics.missingCount += 1;
+              if (demDiagnostics.missingSamples.length < 5 && tileResult.requestedDemUrl) {
+                demDiagnostics.missingSamples.push(tileResult.requestedDemUrl);
+              }
+            }
             loadedTiles += 1;
             onProgress({ loaded: loadedTiles, total: totalTiles });
           })
@@ -84,6 +96,10 @@ export class MapDataProvider {
         south: GeoUtils.tile2lat(endY + 1, zoom),
         west: GeoUtils.tile2lon(startX, zoom),
         east: GeoUtils.tile2lon(endX + 1, zoom)
+      },
+      diagnostics: {
+        demMissingCount: demDiagnostics.missingCount,
+        demMissingSamples: demDiagnostics.missingSamples
       }
     };
   }
@@ -107,7 +123,7 @@ export class MapDataProvider {
     };
   }
 
-  loadTile(tileX, tileY, zoom, offsetX, offsetY, demCtx, photoCtx, downsample = 1) {
+  async loadTile(tileX, tileY, zoom, offsetX, offsetY, demCtx, photoCtx, downsample = 1) {
     const tileSize = 256 / downsample;
     const drawX = offsetX * tileSize;
     const drawY = offsetY * tileSize;
@@ -132,9 +148,48 @@ export class MapDataProvider {
         image.src = url;
       });
 
-    return Promise.all([
-      loadImage(`${this.demUrl}/${zoom}/${tileX}/${tileY}.png`, demCtx, "#000000"),
-      photoCtx ? loadImage(`${this.photoUrl}/${zoom}/${tileX}/${tileY}.jpg`, photoCtx, "#0f2236") : Promise.resolve()
-    ]);
+    const demResult = await this.loadDemTileWithFallback(tileX, tileY, zoom, demCtx, drawX, drawY, tileSize);
+    await (photoCtx ? loadImage(`${this.photoUrl}/${zoom}/${tileX}/${tileY}.jpg`, photoCtx, "#0f2236") : Promise.resolve());
+
+    return demResult;
+  }
+
+  async loadDemTileWithFallback(tileX, tileY, zoom, demCtx, drawX, drawY, tileSize) {
+    let firstRequestedUrl = null;
+    const sources = zoom >= 15 ? DEM_SOURCES_HIGH_ZOOM : DEM_SOURCES_STANDARD;
+
+    for (const source of sources) {
+      const url = `${this.demBaseUrl}/${source}/${zoom}/${tileX}/${tileY}.png`;
+      if (!firstRequestedUrl) firstRequestedUrl = url;
+
+      try {
+        const response = await fetch(url, { cache: "force-cache" });
+        if (!response.ok) {
+          if (response.status === 404) {
+            continue;
+          }
+          continue;
+        }
+
+        const blob = await response.blob();
+        const bitmap = await createImageBitmap(blob);
+        demCtx.drawImage(bitmap, drawX, drawY, tileSize, tileSize);
+        bitmap.close();
+        return {
+          demMissing: false,
+          requestedDemUrl: firstRequestedUrl
+        };
+      } catch (_error) {
+        continue;
+      }
+    }
+
+    demCtx.fillStyle = "#000000";
+    demCtx.fillRect(drawX, drawY, tileSize, tileSize);
+
+    return {
+      demMissing: true,
+      requestedDemUrl: firstRequestedUrl
+    };
   }
 }
