@@ -39,6 +39,7 @@ export class TerrainViewer {
     this.isStreetViewMode = false;
     this.viewpointMarker = null;
     this.skyDome = null;
+    this.skyboxVisible = false;
     this.streetViewState = {
       yaw: 0,
       pitch: 0,
@@ -91,6 +92,7 @@ export class TerrainViewer {
         });
 
         this.skyDome = new THREE.Mesh(geometry, material);
+        this.skyDome.visible = this.skyboxVisible;
         this.scene.add(this.skyDome);
       },
       undefined,
@@ -98,6 +100,13 @@ export class TerrainViewer {
         // 画像読み込みに失敗した場合は既存の背景表現を維持する
       }
     );
+  }
+
+  setSkyboxVisible(visible) {
+    this.skyboxVisible = Boolean(visible);
+    if (this.skyDome) {
+      this.skyDome.visible = this.skyboxVisible;
+    }
   }
 
   disposeCurrentMesh() {
@@ -146,6 +155,7 @@ export class TerrainViewer {
 
   update(data, config) {
     this.exitStreetView();
+    this.setSkyboxVisible(false);
     this.pickCallback = null;
     this.disposeCurrentMesh();
 
@@ -360,6 +370,7 @@ export class TerrainViewer {
 
   resetView() {
     this.exitStreetView();
+    this.setSkyboxVisible(false);
 
     if (!this.frameState) {
       this.camera.position.set(3200, 1800, 3200);

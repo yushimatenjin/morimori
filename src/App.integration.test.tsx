@@ -21,6 +21,8 @@ vi.mock("@/viewer/terrain-viewer", () => {
     enterStreetView() {}
 
     resetView() {}
+
+    setSkyboxVisible() {}
   }
 
   return { TerrainViewer: TerrainViewerMock };

@@ -13,6 +13,7 @@ type TerrainViewerLike = {
   applyAtmosphere: (params: { skyPreset: string; timePreset: string }) => void;
   enterStreetView: (point: WorldPoint, eyeHeight: number) => void;
   resetView: () => void;
+  setSkyboxVisible: (visible: boolean) => void;
 };
 
 type MapDataProviderLike = {
@@ -321,6 +322,7 @@ export function App() {
       const { TerrainViewer } = await import("@/viewer/terrain-viewer");
       if (disposed || !viewerRootRef.current) return;
       viewerRef.current = new TerrainViewer(viewerRootRef.current) as TerrainViewerLike;
+      viewerRef.current.setSkyboxVisible(false);
     }
 
     void initializeViewer();
@@ -362,6 +364,7 @@ export function App() {
   }
 
   function openWorkspace() {
+    viewerRef.current?.setSkyboxVisible(false);
     setShowSplash(false);
     setPhase(AppPhase.IDLE);
     setBusy(false);
@@ -669,6 +672,8 @@ export function App() {
       return;
     }
 
+    viewer.setSkyboxVisible(false);
+
     setBusy(true);
     setLoadingVisible(true);
     setLoadingText("標高タイルを取得しています...");
@@ -844,6 +849,7 @@ export function App() {
 
     viewer.startViewpointPick((point) => {
       setSelectedViewpoint(point);
+      viewer.setSkyboxVisible(true);
       setPlacementGuide(`視点ポイントを指定しました: ${formatWorldPoint(point)} / 次に「人間視点で360°表示」を実行してください。`);
       setStatusMessage("視点ポイントを指定しました。360°確認に進めます。");
     });
@@ -868,6 +874,7 @@ export function App() {
     viewer.camera.fov = Math.min(120, Math.max(20, cameraFov));
     viewer.camera.updateProjectionMatrix();
     viewer.applyAtmosphere({ skyPreset: "clear", timePreset });
+    viewer.setSkyboxVisible(true);
     viewer.enterStreetView(selectedViewpoint, eyeHeight);
 
     setStatusMessage("人間視点で360°確認中です。ドラッグで周囲を確認できます。");
