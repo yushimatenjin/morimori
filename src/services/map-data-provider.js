@@ -8,6 +8,7 @@ const DEM_SOURCES_STANDARD = ["dem_png"];
 const PHOTO_FALLBACK_COLOR = "#0f2236";
 const DEM_NO_DATA_VALUE = 8388608;
 const DEM_NO_DATA_FILL_STYLE = "rgb(128, 0, 0)";
+const DEM_NO_DATA_TOLERANCE = 2048;
 const DEM_MIN_ELEVATION_M = -200;
 const DEM_MAX_ELEVATION_M = 4500;
 const DEM_SPIKE_THRESHOLD_M = 1200;
@@ -91,21 +92,22 @@ export class MapDataProvider {
       const b = demData[i * 4 + 2];
       const a = demData[i * 4 + 3];
       const value = r * 65536 + g * 256 + b;
-      if (a === 0 || value === DEM_NO_DATA_VALUE) {
+      if (a === 0 || this.isNoDataLikeValue(value)) {
         heights[i] = Number.NaN;
         invalidHeightCount += 1;
         continue;
       }
 
       const rawHeight = value < DEM_NO_DATA_VALUE ? value * 0.01 : (value - 16777216) * 0.01;
-      const clamped = Math.min(DEM_MAX_ELEVATION_M, Math.max(DEM_MIN_ELEVATION_M, rawHeight));
-      if (!Number.isFinite(clamped) || clamped !== rawHeight) {
+      if (!Number.isFinite(rawHeight) || rawHeight < DEM_MIN_ELEVATION_M || rawHeight > DEM_MAX_ELEVATION_M) {
+        heights[i] = Number.NaN;
         invalidHeightCount += 1;
+        continue;
       }
-      heights[i] = Number.isFinite(clamped) ? clamped : Number.NaN;
+      heights[i] = rawHeight;
     }
 
-    const { interpolatedCount, unresolvedCount } = this.repairMissingHeights(heights, demCanvas.width, demCanvas.height);
+    const { interpolatedCount, propagatedCount, unresolvedCount } = this.repairMissingHeights(heights, demCanvas.width, demCanvas.height);
     const spikeCorrectedCount = this.suppressSpikeOutliers(heights, demCanvas.width, demCanvas.height);
     invalidHeightCount += unresolvedCount;
 
@@ -125,9 +127,14 @@ export class MapDataProvider {
         demMissingSamples: demDiagnostics.missingSamples,
         invalidHeightCount,
         interpolatedCount,
+        propagatedCount,
         spikeCorrectedCount
       }
     };
+  }
+
+  isNoDataLikeValue(value) {
+    return Math.abs(value - DEM_NO_DATA_VALUE) <= DEM_NO_DATA_TOLERANCE;
   }
 
   repairMissingHeights(heights, width, height) {
@@ -174,6 +181,8 @@ export class MapDataProvider {
       interpolatedCount += passChanges;
     }
 
+    const propagatedCount = this.propagateMissingHeights(heights, width, height);
+
     let unresolvedCount = 0;
     for (let i = 0; i < heights.length; i += 1) {
       if (!Number.isFinite(heights[i])) {
@@ -184,8 +193,88 @@ export class MapDataProvider {
 
     return {
       interpolatedCount,
+      propagatedCount,
       unresolvedCount
     };
+  }
+
+  propagateMissingHeights(heights, width, height) {
+    let totalChanges = 0;
+
+    for (let pass = 0; pass < 6; pass += 1) {
+      let passChanges = 0;
+
+      for (let y = 0; y < height; y += 1) {
+        let lastFinite = Number.NaN;
+        for (let x = 0; x < width; x += 1) {
+          const index = y * width + x;
+          const value = heights[index];
+          if (Number.isFinite(value)) {
+            lastFinite = value;
+            continue;
+          }
+          if (Number.isFinite(lastFinite)) {
+            heights[index] = lastFinite;
+            passChanges += 1;
+          }
+        }
+      }
+
+      for (let y = 0; y < height; y += 1) {
+        let lastFinite = Number.NaN;
+        for (let x = width - 1; x >= 0; x -= 1) {
+          const index = y * width + x;
+          const value = heights[index];
+          if (Number.isFinite(value)) {
+            lastFinite = value;
+            continue;
+          }
+          if (Number.isFinite(lastFinite)) {
+            heights[index] = lastFinite;
+            passChanges += 1;
+          }
+        }
+      }
+
+      for (let x = 0; x < width; x += 1) {
+        let lastFinite = Number.NaN;
+        for (let y = 0; y < height; y += 1) {
+          const index = y * width + x;
+          const value = heights[index];
+          if (Number.isFinite(value)) {
+            lastFinite = value;
+            continue;
+          }
+          if (Number.isFinite(lastFinite)) {
+            heights[index] = lastFinite;
+            passChanges += 1;
+          }
+        }
+      }
+
+      for (let x = 0; x < width; x += 1) {
+        let lastFinite = Number.NaN;
+        for (let y = height - 1; y >= 0; y -= 1) {
+          const index = y * width + x;
+          const value = heights[index];
+          if (Number.isFinite(value)) {
+            lastFinite = value;
+            continue;
+          }
+          if (Number.isFinite(lastFinite)) {
+            heights[index] = lastFinite;
+            passChanges += 1;
+          }
+        }
+      }
+
+      totalChanges += passChanges;
+      if (passChanges === 0) {
+        break;
+      }
+    }
+
+    return totalChanges;
   }
 
   suppressSpikeOutliers(heights, width, height) {
