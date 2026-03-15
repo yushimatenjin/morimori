@@ -78,6 +78,16 @@ type TwoPointGenerationPlan = {
   valid: boolean;
 };
 
+type HigherDetailPlan = {
+  terrain: Terrain;
+  notice: string;
+};
+
+type GenerateTerrainOptions = {
+  terrainOverride?: Terrain;
+  highDetailNotice?: string | null;
+};
+
 type FeaturedLocation = {
   label: string;
   centerLabel: string;
@@ -274,6 +284,72 @@ function buildTwoPointGenerationPlan(start: Center, end: Center, marginScale = 1
   };
 }
 
+function buildHigherDetailPlan(center: Center, currentTerrain: Terrain): HigherDetailPlan | null {
+  if (currentTerrain.zoom < 15) {
+    const nextZoom = currentTerrain.zoom + 1;
+    const limited = applyTileLimit(center, currentTerrain.width, currentTerrain.height, nextZoom);
+    const nextTerrain: Terrain = {
+      width: limited.width,
+      height: limited.height,
+      zoom: nextZoom
+    };
+    if (
+      nextTerrain.zoom === currentTerrain.zoom &&
+      nextTerrain.width === currentTerrain.width &&
+      nextTerrain.height === currentTerrain.height
+    ) {
+      return null;
+    }
+
+    const noticeParts = [`細かさを Zoom ${currentTerrain.zoom} → ${nextZoom} に上げます。`];
+    if (limited.notice) {
+      noticeParts.push(limited.notice);
+    }
+    return {
+      terrain: nextTerrain,
+      notice: noticeParts.join(" ")
+    };
+  }
+
+  if (currentTerrain.width <= 4 && currentTerrain.height <= 4) {
+    return null;
+  }
+
+  let narrowedWidth = Math.max(4, Number((currentTerrain.width * 0.75).toFixed(1)));
+  let narrowedHeight = Math.max(4, Number((currentTerrain.height * 0.75).toFixed(1)));
+  if (narrowedWidth >= currentTerrain.width && currentTerrain.width > 4) {
+    narrowedWidth = Math.max(4, currentTerrain.width - 1);
+  }
+  if (narrowedHeight >= currentTerrain.height && currentTerrain.height > 4) {
+    narrowedHeight = Math.max(4, currentTerrain.height - 1);
+  }
+
+  const limited = applyTileLimit(center, narrowedWidth, narrowedHeight, currentTerrain.zoom);
+  const nextTerrain: Terrain = {
+    width: limited.width,
+    height: limited.height,
+    zoom: currentTerrain.zoom
+  };
+  if (
+    nextTerrain.zoom === currentTerrain.zoom &&
+    nextTerrain.width === currentTerrain.width &&
+    nextTerrain.height === currentTerrain.height
+  ) {
+    return null;
+  }
+
+  const noticeParts = [
+    `Zoom ${currentTerrain.zoom} のまま範囲を ${nextTerrain.width}km x ${nextTerrain.height}km へ絞って、細部確認用に再生成します。`
+  ];
+  if (limited.notice) {
+    noticeParts.push(limited.notice);
+  }
+  return {
+    terrain: nextTerrain,
+    notice: noticeParts.join(" ")
+  };
+}
+
 export function App() {
   const viewerRootRef = useRef<HTMLDivElement | null>(null);
   const viewerRef = useRef<TerrainViewerLike | null>(null);
@@ -331,9 +407,11 @@ export function App() {
     return preset.width === summaryTerrain.width && preset.height === summaryTerrain.height && preset.zoom === summaryTerrain.zoom;
   })?.[0] ?? null) as PresetKey | null;
   const presetLabel = useTwoPointMode ? "2地点自動包含" : matchedPreset ? PRESETS[matchedPreset].label : "カスタム設定";
+  const higherDetailPlan = !useTwoPointMode ? buildHigherDetailPlan(center, terrain) : null;
 
   const canGenerate = hasRequiredLocation && !busy && phase !== AppPhase.SEARCHING && phase !== AppPhase.GENERATING;
   const canSave = phase === AppPhase.GENERATED && hasGeneratedMesh && !busy;
+  const canEnhanceDetail = phase === AppPhase.GENERATED && hasGeneratedMesh && !busy && !useTwoPointMode && higherDetailPlan !== null;
   const showFinishingSection = phase === AppPhase.GENERATED && hasGeneratedMesh;
 
   useEffect(() => {
@@ -697,7 +775,7 @@ export function App() {
     setStatusMessage(statusNotice);
   }
 
-  async function generateTerrain() {
+  async function generateTerrain(options: GenerateTerrainOptions = {}) {
     if (busy) return;
 
     if (!hasRequiredLocation) {
@@ -735,7 +813,7 @@ export function App() {
       }
 
       let generationCenter = center;
-      let generationTerrain = terrain;
+      let generationTerrain = options.terrainOverride ?? terrain;
       let twoPointDistanceKm: number | null = null;
       let twoPointNotice: string | null = null;
       let twoPointValid = true;
@@ -784,18 +862,26 @@ export function App() {
         const fallbackHint =
           generationTerrain.zoom > 12 ? "Zoomを12に下げるか範囲を狭めると改善しやすくなります。" : "範囲を狭めるか別地点で再生成してください。";
         setStatusMessage("DEMの欠損または無効値を補完して表示しています。");
-        setDetailOverride(
-          `警告: DEM欠損 ${missingCount} 枚 / 無効標高 ${invalidHeightCount} 点 / 例: ${sample || "取得URLなし"} / 次: ${fallbackHint}`
-        );
+        const warningText = `警告: DEM欠損 ${missingCount} 枚 / 無効標高 ${invalidHeightCount} 点 / 例: ${sample || "取得URLなし"} / 次: ${fallbackHint}`;
+        if (options.highDetailNotice) {
+          setDetailOverride(`高精細化: ${options.highDetailNotice} / ${warningText}`);
+        } else {
+          setDetailOverride(warningText);
+        }
       } else {
         if (useTwoPointMode && secondaryPoint && twoPointDistanceKm !== null) {
           setStatusMessage(
             `2地点（${center.label} - ${secondaryPoint.label} / 約${twoPointDistanceKm.toFixed(1)}km）を含む地形を生成しました。先に3Dモデルを保存してください。`
           );
+        } else if (options.highDetailNotice) {
+          setStatusMessage("高精細版の地形を生成しました。先に3Dモデルを保存してください。");
         } else {
           setStatusMessage("地形を生成しました。先に3Dモデルを保存してください。");
         }
         setDetailOverride("現在の価値: 地形を制作へ持ち出せます。次章の価値: 今後は比較・共有にも接続予定です。");
+        if (options.highDetailNotice) {
+          setDetailOverride(`高精細化: ${options.highDetailNotice} / 現在の価値: 地形を制作へ持ち出せます。次章の価値: 今後は比較・共有にも接続予定です。`);
+        }
         if (twoPointNotice) {
           setDetailOverride(`補足: ${twoPointNotice} / 現在の価値: 地形を制作へ持ち出せます。次章の価値: 今後は比較・共有にも接続予定です。`);
         }
@@ -872,6 +958,28 @@ export function App() {
     setPhase(AppPhase.READY_TO_GENERATE);
     setStatusMessage("現在の条件で再生成します。");
     await generateTerrain();
+  }
+
+  async function regenerateHigherDetail() {
+    if (!hasRequiredLocation || busy || !hasGeneratedMesh) return;
+    if (useTwoPointMode) {
+      setStatusMessage("2地点モードは自動範囲計算のため、高精細化は1地点モードで利用してください。");
+      return;
+    }
+
+    const plan = buildHigherDetailPlan(center, terrain);
+    if (!plan) {
+      setStatusMessage("すでに高精細な条件です。これ以上は細かくできません。");
+      setDetailOverride("現在の条件は高精細上限です。必要なら地点を絞って再生成してください。");
+      return;
+    }
+
+    setPhase(AppPhase.READY_TO_GENERATE);
+    setStatusMessage("高精細化の条件で再生成します。");
+    await generateTerrain({
+      terrainOverride: plan.terrain,
+      highDetailNotice: plan.notice
+    });
   }
 
   function recoverFromError() {
@@ -1165,7 +1273,7 @@ export function App() {
               <div className="c-preset-grid" data-component="PresetButtons">
                 {Object.entries(PRESETS).map(([key, preset]) => (
                   <button
-                    className={`c-preset-button ${activePreset === key ? "is-active" : ""}`.trim()}
+                    className={`c-preset-button ${matchedPreset === key ? "is-active" : ""}`.trim()}
                     data-action="apply-preset"
                     disabled={busy || !hasSelectedLocation}
                     key={key}
@@ -1237,6 +1345,11 @@ export function App() {
             ) : null}
 
             {meshInfo ? <p className="c-inline-note">生成メッシュ: {meshInfo.width} x {meshInfo.height}</p> : null}
+            {phase === AppPhase.GENERATED && !useTwoPointMode && higherDetailPlan ? (
+              <p className="c-inline-note">
+                高精細化候補: Zoom {terrain.zoom} → {higherDetailPlan.terrain.zoom} / 範囲 {higherDetailPlan.terrain.width} x {higherDetailPlan.terrain.height} km
+              </p>
+            ) : null}
           </section>
 
           {showFinishingSection ? (
@@ -1350,6 +1463,17 @@ export function App() {
                 地形を再生成
               </button>
             ) : null}
+            {hasGeneratedMesh && !useTwoPointMode ? (
+              <button
+                className="c-button c-button--outline"
+                data-action="enhance-detail-terrain"
+                disabled={!canEnhanceDetail}
+                onClick={() => void regenerateHigherDetail()}
+                type="button"
+              >
+                高精細で再生成
+              </button>
+            ) : null}
           </div>
         </aside>
 
@@ -1394,6 +1518,17 @@ export function App() {
               type="button"
             >
               地形を再生成
+            </button>
+          ) : null}
+          {hasGeneratedMesh && !useTwoPointMode ? (
+            <button
+              className="c-button c-button--outline"
+              data-action="mobile-enhance-detail-terrain"
+              disabled={!canEnhanceDetail}
+              onClick={() => void regenerateHigherDetail()}
+              type="button"
+            >
+              高精細で再生成
             </button>
           ) : null}
         </div>

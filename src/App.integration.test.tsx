@@ -116,4 +116,30 @@ describe("App integration", () => {
     expect(within(errorCard).getByText(/次:/)).toBeInTheDocument();
     expect(getEnabledPrimaryAction("条件を見直して再試行")).toBeTruthy();
   });
+
+  it("生成後に高精細で再生成できる", async () => {
+    render(<App />);
+    await openWorkspace();
+
+    await userEvent.click(screen.getByRole("button", { name: /富士山/ }));
+    const generateButton = getEnabledPrimaryAction("この条件で地形を生成");
+    if (!generateButton) {
+      throw new Error("生成ボタンが活性化されていません。");
+    }
+    await userEvent.click(generateButton);
+
+    await waitFor(() => {
+      expect(screen.getAllByRole("button", { name: "3Dモデルを保存" }).length).toBeGreaterThan(0);
+    });
+
+    const enhanceButton = screen.getAllByRole("button", { name: "高精細で再生成" }).find((button) => !button.hasAttribute("disabled"));
+    if (!enhanceButton) {
+      throw new Error("高精細で再生成ボタンが活性化されていません。");
+    }
+    await userEvent.click(enhanceButton);
+
+    await waitFor(() => {
+      expect(screen.getByText("高精細版の地形を生成しました。先に3Dモデルを保存してください。")).toBeInTheDocument();
+    });
+  });
 });
