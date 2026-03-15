@@ -25,6 +25,7 @@ type MapDataProviderLike = {
     diagnostics?: {
       demMissingCount?: number;
       demMissingSamples?: string[];
+      invalidHeightCount?: number;
     };
   }>;
 };
@@ -61,6 +62,17 @@ type ErrorInfo = {
 };
 
 type PresetKey = "wide" | "mid" | "focus";
+type GenerationMode = "single-point" | "two-points";
+type TwoPointMarginPreset = "tight" | "standard" | "wide";
+
+type TwoPointGenerationPlan = {
+  center: Center;
+  terrain: Terrain;
+  distanceKm: number;
+  notice: string | null;
+  tileCount: number;
+  valid: boolean;
+};
 
 type FeaturedLocation = {
   label: string;
@@ -72,6 +84,7 @@ type FeaturedLocation = {
 
 const FEATURED_LOCATIONS: FeaturedLocation[] = [
   { label: "富士山", centerLabel: "富士山周辺", area: "山梨 / 静岡", lat: 35.3606, lng: 138.7273 },
+  { label: "横浜駅", centerLabel: "横浜駅周辺", area: "神奈川", lat: 35.4662, lng: 139.6227 },
   { label: "大山", centerLabel: "大山周辺", area: "鳥取", lat: 35.3713, lng: 133.5389 },
   { label: "白山", centerLabel: "白山周辺", area: "石川 / 岐阜", lat: 36.1551, lng: 136.7713 },
   { label: "阿蘇山", centerLabel: "阿蘇山周辺", area: "熊本", lat: 32.8847, lng: 131.1044 },
@@ -89,6 +102,12 @@ const PRESETS: Record<PresetKey, Terrain & { label: string }> = {
 };
 
 const MAX_TILE_COUNT = 1000;
+const TWO_POINT_ZOOM_CANDIDATES = [12, 11, 10, 9, 8] as const;
+const TWO_POINT_MARGIN_PRESETS: Record<TwoPointMarginPreset, { label: string; scale: number; helper: string }> = {
+  tight: { label: "狭める", scale: 0.8, helper: "余白を抑えて2地点を近めに収めます。" },
+  standard: { label: "標準", scale: 1, helper: "2地点を標準的な余白で収めます。" },
+  wide: { label: "広め", scale: 1.35, helper: "2地点の周辺を広めに含めます。" }
+};
 const DEFAULT_CENTER: Center = {
   lat: 35.6812,
   lng: 139.7671,
@@ -130,6 +149,21 @@ function formatWorldPoint(point: WorldPoint) {
 
 function formatErrorDetail(errorInfo: ErrorInfo) {
   return `原因: ${errorInfo.cause} / 影響: ${errorInfo.impact} / 次: ${errorInfo.next}`;
+}
+
+function toRadians(value: number) {
+  return (value * Math.PI) / 180;
+}
+
+function calculateGreatCircleDistanceKm(start: Center, end: Center) {
+  const earthRadiusKm = 6371;
+  const latDiff = toRadians(end.lat - start.lat);
+  const lonDiff = toRadians(end.lng - start.lng);
+  const lat1 = toRadians(start.lat);
+  const lat2 = toRadians(end.lat);
+  const a = Math.sin(latDiff / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(lonDiff / 2) ** 2;
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return earthRadiusKm * c;
 }
 
 function estimateTileCoverage(center: Center, width: number, height: number, zoom: number) {
@@ -174,6 +208,50 @@ function applyTileLimit(center: Center, width: number, height: number, zoom: num
   };
 }
 
+function buildTwoPointGenerationPlan(start: Center, end: Center, marginScale = 1): TwoPointGenerationPlan {
+  const derivedCenter: Center = {
+    lat: (start.lat + end.lat) / 2,
+    lng: (start.lng + end.lng) / 2,
+    label: `${start.label} - ${end.label} の中間`
+  };
+
+  const metersPerDegree = GeoUtils.getMetersPerDegree(derivedCenter.lat);
+  const deltaWidthKm = (Math.abs(end.lng - start.lng) * metersPerDegree.lon) / 1000;
+  const deltaHeightKm = (Math.abs(end.lat - start.lat) * metersPerDegree.lat) / 1000;
+  const distanceKm = calculateGreatCircleDistanceKm(start, end);
+  const marginKm = Math.max(2, distanceKm * 0.12 * marginScale);
+  const plannedWidthKm = Math.max(8, deltaWidthKm + marginKm * 2);
+  const plannedHeightKm = Math.max(8, deltaHeightKm + marginKm * 2);
+
+  const selectedZoom =
+    TWO_POINT_ZOOM_CANDIDATES.find((candidateZoom) => {
+      return estimateTileCoverage(derivedCenter, plannedWidthKm, plannedHeightKm, candidateZoom) <= MAX_TILE_COUNT;
+    }) ?? TWO_POINT_ZOOM_CANDIDATES[TWO_POINT_ZOOM_CANDIDATES.length - 1];
+
+  const tileCount = estimateTileCoverage(derivedCenter, plannedWidthKm, plannedHeightKm, selectedZoom);
+  const valid = tileCount <= MAX_TILE_COUNT;
+  let notice: string | null = null;
+
+  if (!valid) {
+    notice = "2地点が離れすぎてタイル上限を超えます。より近い2地点を指定してください。";
+  } else if (selectedZoom < TWO_POINT_ZOOM_CANDIDATES[0]) {
+    notice = `2地点全体を含めるため、細かさを Zoom ${selectedZoom} に自動調整しました。`;
+  }
+
+  return {
+    center: derivedCenter,
+    terrain: {
+      width: Number(plannedWidthKm.toFixed(1)),
+      height: Number(plannedHeightKm.toFixed(1)),
+      zoom: selectedZoom
+    },
+    distanceKm,
+    notice,
+    tileCount,
+    valid
+  };
+}
+
 export function App() {
   const viewerRootRef = useRef<HTMLDivElement | null>(null);
   const viewerRef = useRef<TerrainViewerLike | null>(null);
@@ -189,8 +267,12 @@ export function App() {
   const [detailOverride, setDetailOverride] = useState<string | null>(null);
   const [errorInfo, setErrorInfo] = useState<ErrorInfo | null>(null);
 
+  const [generationMode, setGenerationMode] = useState<GenerationMode>("single-point");
+  const [twoPointMarginPreset, setTwoPointMarginPreset] = useState<TwoPointMarginPreset>("standard");
   const [searchQuery, setSearchQuery] = useState("");
+  const [secondarySearchQuery, setSecondarySearchQuery] = useState("");
   const [center, setCenter] = useState<Center>(DEFAULT_CENTER);
+  const [secondaryPoint, setSecondaryPoint] = useState<Center | null>(null);
   const [hasSelectedLocation, setHasSelectedLocation] = useState(false);
 
   const [terrain, setTerrain] = useState<Terrain>(DEFAULT_TERRAIN);
@@ -208,15 +290,26 @@ export function App() {
 
   const vm = phaseViewModel[phase] || phaseViewModel[AppPhase.IDLE];
   const statusDetail = detailOverride ?? vm.detail;
-  const centerMeta = `中心地点: ${center.label}（${center.lat.toFixed(4)}, ${center.lng.toFixed(4)}）`;
-  const estimatedTiles = estimateTileCoverage(center, terrain.width, terrain.height, terrain.zoom);
+  const useTwoPointMode = generationMode === "two-points";
+  const selectedTwoPointMargin = TWO_POINT_MARGIN_PRESETS[twoPointMarginPreset];
+  const twoPointPlanPreview =
+    useTwoPointMode && secondaryPoint ? buildTwoPointGenerationPlan(center, secondaryPoint, selectedTwoPointMargin.scale) : null;
+  const hasRequiredLocation = hasSelectedLocation && (!useTwoPointMode || (secondaryPoint !== null && twoPointPlanPreview?.valid === true));
+  const summaryCenter = useTwoPointMode && twoPointPlanPreview ? twoPointPlanPreview.center : center;
+  const summaryTerrain = useTwoPointMode && twoPointPlanPreview ? twoPointPlanPreview.terrain : terrain;
+  const centerMeta = useTwoPointMode
+    ? `開始: ${center.label}${secondaryPoint ? ` / 終点: ${secondaryPoint.label}` : " / 終点: 未指定"}`
+    : `中心地点: ${center.label}（${center.lat.toFixed(4)}, ${center.lng.toFixed(4)}）`;
+  const estimatedTiles = useTwoPointMode && twoPointPlanPreview
+    ? twoPointPlanPreview.tileCount
+    : estimateTileCoverage(summaryCenter, summaryTerrain.width, summaryTerrain.height, summaryTerrain.zoom);
 
   const matchedPreset = (Object.entries(PRESETS).find(([, preset]) => {
-    return preset.width === terrain.width && preset.height === terrain.height && preset.zoom === terrain.zoom;
+    return preset.width === summaryTerrain.width && preset.height === summaryTerrain.height && preset.zoom === summaryTerrain.zoom;
   })?.[0] ?? null) as PresetKey | null;
-  const presetLabel = matchedPreset ? PRESETS[matchedPreset].label : "カスタム設定";
+  const presetLabel = useTwoPointMode ? "2地点自動包含" : matchedPreset ? PRESETS[matchedPreset].label : "カスタム設定";
 
-  const canGenerate = hasSelectedLocation && !busy && phase !== AppPhase.SEARCHING && phase !== AppPhase.GENERATING;
+  const canGenerate = hasRequiredLocation && !busy && phase !== AppPhase.SEARCHING && phase !== AppPhase.GENERATING;
   const canSave = phase === AppPhase.GENERATED && hasGeneratedMesh && !busy;
   const showFinishingSection = phase === AppPhase.GENERATED && hasGeneratedMesh;
 
@@ -258,9 +351,13 @@ export function App() {
   function selectRecommendedLocationFromPrimary() {
     const recommended = FEATURED_LOCATIONS[0];
     setCenterPoint({ lat: recommended.lat, lng: recommended.lng, label: recommended.centerLabel }, recommended.label);
-    setStatusMessage(
-      `おすすめ地点として ${recommended.centerLabel} を選択しました。必要なら地点を変更し、主CTAで地形を生成してください。`
-    );
+    if (useTwoPointMode) {
+      setStatusMessage(`開始地点として ${recommended.centerLabel} を選択しました。次に終点を検索して指定してください。`);
+    } else {
+      setStatusMessage(
+        `おすすめ地点として ${recommended.centerLabel} を選択しました。必要なら地点を変更し、主CTAで地形を生成してください。`
+      );
+    }
     setDetailOverride("地点はあとから自由に変更できます。まずは生成して成果を確認してください。");
   }
 
@@ -272,7 +369,11 @@ export function App() {
     setStatusMessage("最初に地点を選択してください。");
     setDetailOverride(null);
     setErrorInfo(null);
+    setGenerationMode("single-point");
+    setTwoPointMarginPreset("standard");
     setHasSelectedLocation(false);
+    setSecondaryPoint(null);
+    setSecondarySearchQuery("");
     setCenter(DEFAULT_CENTER);
     setTerrain(DEFAULT_TERRAIN);
     setActivePreset("mid");
@@ -290,15 +391,84 @@ export function App() {
     }
     setHasSelectedLocation(true);
     clearErrorState();
+    if (useTwoPointMode) {
+      if (!secondaryPoint) {
+        setPhase(AppPhase.IDLE);
+        setStatusMessage("開始地点を設定しました。2点目を指定すると生成できます。");
+        return;
+      }
+
+      const plan = buildTwoPointGenerationPlan(nextCenter, secondaryPoint, selectedTwoPointMargin.scale);
+      if (!plan.valid) {
+        setPhase(AppPhase.IDLE);
+        setStatusMessage(plan.notice || "2地点の距離が広すぎるため、この組み合わせでは生成できません。");
+        return;
+      }
+      setPhase(AppPhase.READY_TO_GENERATE);
+      return;
+    }
+
     setPhase(AppPhase.READY_TO_GENERATE);
+  }
+
+  function setSecondaryCenterPoint(nextCenter: Center, query?: string) {
+    setSecondaryPoint(nextCenter);
+    if (query) {
+      setSecondarySearchQuery(query);
+    }
+    clearErrorState();
+
+    if (!hasSelectedLocation) {
+      setPhase(AppPhase.IDLE);
+      setStatusMessage("先に開始地点を選択してください。");
+      return;
+    }
+
+    const nextPlan = buildTwoPointGenerationPlan(center, nextCenter, selectedTwoPointMargin.scale);
+    if (!nextPlan.valid) {
+      setPhase(AppPhase.IDLE);
+      setStatusMessage(nextPlan.notice || "2地点の距離が広すぎるため、この組み合わせでは生成できません。");
+      return;
+    }
+
+    setPhase(AppPhase.READY_TO_GENERATE);
+    setStatusMessage(`2地点を設定しました: 開始 ${center.label} / 終点 ${nextCenter.label}。主CTAで地形を生成してください。`);
   }
 
   function selectFeaturedLocation(location: FeaturedLocation) {
     if (busy) return;
 
     setCenterPoint({ lat: location.lat, lng: location.lng, label: location.centerLabel }, location.label);
-    setStatusMessage(`${location.centerLabel} を選択しました。条件を確認して地形を生成してください。`);
+    if (!useTwoPointMode || secondaryPoint) {
+      setStatusMessage(`${location.centerLabel} を選択しました。条件を確認して地形を生成してください。`);
+    }
     setDetailOverride(null);
+  }
+
+  async function findLocationByQuery(query: string) {
+    const params = new URLSearchParams({
+      q: query,
+      format: "jsonv2",
+      limit: "1",
+      "accept-language": "ja"
+    });
+
+    const response = await fetch(`https://nominatim.openstreetmap.org/search?${params.toString()}`);
+    if (!response.ok) {
+      throw new Error("検索サービスへ接続できませんでした。通信状態を確認してください。");
+    }
+
+    const data = (await response.json()) as Array<{ lat: string; lon: string; display_name?: string }>;
+    if (!Array.isArray(data) || data.length === 0) {
+      throw new Error("地点が見つかりません。別のキーワードで再検索してください。");
+    }
+
+    const result = data[0];
+    return {
+      lat: Number(result.lat),
+      lng: Number(result.lon),
+      label: result.display_name || query
+    } as Center;
   }
 
   async function searchLocation() {
@@ -320,38 +490,50 @@ export function App() {
     setStatusMessage(`「${query}」を検索しています。`);
 
     try {
-      const params = new URLSearchParams({
-        q: query,
-        format: "jsonv2",
-        limit: "1",
-        "accept-language": "ja"
-      });
-
-      const response = await fetch(`https://nominatim.openstreetmap.org/search?${params.toString()}`);
-      if (!response.ok) {
-        throw new Error("検索サービスへ接続できませんでした。通信状態を確認してください。");
-      }
-
-      const data = (await response.json()) as Array<{ lat: string; lon: string; display_name?: string }>;
-      if (!Array.isArray(data) || data.length === 0) {
-        throw new Error("地点が見つかりません。別のキーワードで再検索してください。");
-      }
-
-      const result = data[0];
-      const nextCenter: Center = {
-        lat: Number(result.lat),
-        lng: Number(result.lon),
-        label: result.display_name || query
-      };
-
+      const nextCenter = await findLocationByQuery(query);
       setCenterPoint(nextCenter, query);
-      setStatusMessage(`中心地点を設定しました。次に「この条件で地形を生成」を実行してください。`);
+      if (!useTwoPointMode || secondaryPoint) {
+        setStatusMessage(`中心地点を設定しました。次に「この条件で地形を生成」を実行してください。`);
+      }
     } catch (error: unknown) {
       const message = getErrorMessage(error);
       setErrorState({
         cause: message,
         impact: "地点が確定していないため、生成条件を固定できません。",
         next: "検索語を見直して再検索してください。"
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function searchSecondaryLocation() {
+    const query = secondarySearchQuery.trim();
+    if (!query) {
+      setErrorState({
+        cause: "終点の地点名が入力されていません。",
+        impact: "2地点モードの終点が未設定のため生成へ進めません。",
+        next: "終点の地点名を入力して再検索してください。"
+      });
+      return;
+    }
+
+    if (busy) return;
+
+    setBusy(true);
+    setPhase(AppPhase.SEARCHING);
+    clearErrorState();
+    setStatusMessage(`終点候補「${query}」を検索しています。`);
+
+    try {
+      const nextCenter = await findLocationByQuery(query);
+      setSecondaryCenterPoint(nextCenter, query);
+    } catch (error: unknown) {
+      const message = getErrorMessage(error);
+      setErrorState({
+        cause: message,
+        impact: "終点が確定していないため、2地点範囲を計算できません。",
+        next: "終点の検索語を見直して再検索してください。"
       });
     } finally {
       setBusy(false);
@@ -365,8 +547,84 @@ export function App() {
     }
   }
 
+  function onSecondarySearchKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      void searchSecondaryLocation();
+    }
+  }
+
+  function onGenerationModeChange(nextMode: GenerationMode) {
+    setGenerationMode(nextMode);
+    clearErrorState();
+
+    if (nextMode === "single-point") {
+      if (hasSelectedLocation) {
+        setPhase(AppPhase.READY_TO_GENERATE);
+        setStatusMessage("1地点モードに切り替えました。現在の中心地点で生成できます。");
+      } else {
+        setPhase(AppPhase.IDLE);
+        setStatusMessage("1地点モードです。地点を選択してください。");
+      }
+      return;
+    }
+
+    if (!hasSelectedLocation) {
+      setPhase(AppPhase.IDLE);
+      setStatusMessage("2地点モードです。先に開始地点を選択してください。");
+      return;
+    }
+
+    if (secondaryPoint) {
+      const plan = buildTwoPointGenerationPlan(center, secondaryPoint, selectedTwoPointMargin.scale);
+      if (!plan.valid) {
+        setPhase(AppPhase.IDLE);
+        setStatusMessage(plan.notice || "2地点の距離が広すぎるため、この組み合わせでは生成できません。");
+      } else {
+        setPhase(AppPhase.READY_TO_GENERATE);
+        setStatusMessage(`2地点モードです。開始 ${center.label} / 終点 ${secondaryPoint.label} を生成できます。`);
+      }
+      return;
+    }
+
+    setPhase(AppPhase.IDLE);
+    setStatusMessage("2地点モードです。終点を検索して指定してください。");
+  }
+
+  function onTwoPointMarginPresetChange(nextPreset: TwoPointMarginPreset) {
+    if (twoPointMarginPreset === nextPreset) return;
+    setTwoPointMarginPreset(nextPreset);
+    clearErrorState();
+
+    if (!useTwoPointMode) return;
+
+    if (!hasSelectedLocation) {
+      setPhase(AppPhase.IDLE);
+      setStatusMessage("2地点モードです。先に開始地点を選択してください。");
+      return;
+    }
+
+    if (!secondaryPoint) {
+      setPhase(AppPhase.IDLE);
+      setStatusMessage("2地点モードです。終点を検索して指定してください。");
+      return;
+    }
+
+    const nextScale = TWO_POINT_MARGIN_PRESETS[nextPreset].scale;
+    const plan = buildTwoPointGenerationPlan(center, secondaryPoint, nextScale);
+    if (!plan.valid) {
+      setPhase(AppPhase.IDLE);
+      setStatusMessage(plan.notice || "2地点の距離が広すぎるため、この余白倍率では生成できません。");
+      return;
+    }
+
+    setPhase(AppPhase.READY_TO_GENERATE);
+    setStatusMessage(`余白倍率を「${TWO_POINT_MARGIN_PRESETS[nextPreset].label}」に変更しました。主CTAで生成できます。`);
+  }
+
   function applyPreset(presetKey: PresetKey) {
     if (busy) return;
+    if (useTwoPointMode) return;
 
     if (!hasSelectedLocation) {
       setPhase(AppPhase.IDLE);
@@ -381,25 +639,23 @@ export function App() {
       height: limited.height,
       zoom: preset.zoom
     };
+    const statusNotice = limited.notice ? `${preset.label} を適用しました。${limited.notice}` : `${preset.label} を適用しました。生成準備ができています。`;
 
     setTerrain(nextTerrain);
     setActivePreset(presetKey);
     clearErrorState();
     setPhase(AppPhase.READY_TO_GENERATE);
-
-    if (limited.notice) {
-      setStatusMessage(`${preset.label} を適用しました。${limited.notice}`);
-    } else {
-      setStatusMessage(`${preset.label} を適用しました。生成準備ができています。`);
-    }
+    setStatusMessage(statusNotice);
   }
 
   async function generateTerrain() {
     if (busy) return;
 
-    if (!hasSelectedLocation) {
+    if (!hasRequiredLocation) {
       setPhase(AppPhase.IDLE);
-      setStatusMessage("先に地点を選択してください。地点選択後に生成できます。");
+      setStatusMessage(
+        useTwoPointMode ? "2地点モードです。開始地点と終点を指定してください。" : "先に地点を選択してください。地点選択後に生成できます。"
+      );
       return;
     }
 
@@ -425,22 +681,42 @@ export function App() {
         providerRef.current = new MapDataProvider() as unknown as MapDataProviderLike;
       }
 
-      const bounds = GeoUtils.calculateBounds(center.lat, center.lng, terrain.width, terrain.height);
-      const data = await providerRef.current.fetchMapData(bounds, terrain.zoom, true, ({ loaded, total }) => {
+      let generationCenter = center;
+      let generationTerrain = terrain;
+      let twoPointDistanceKm: number | null = null;
+      let twoPointNotice: string | null = null;
+      let twoPointValid = true;
+
+      if (useTwoPointMode && secondaryPoint) {
+        const twoPointPlan = buildTwoPointGenerationPlan(center, secondaryPoint, selectedTwoPointMargin.scale);
+        generationCenter = twoPointPlan.center;
+        generationTerrain = twoPointPlan.terrain;
+        twoPointDistanceKm = twoPointPlan.distanceKm;
+        twoPointNotice = twoPointPlan.notice;
+        twoPointValid = twoPointPlan.valid;
+      }
+
+      if (useTwoPointMode && !twoPointValid) {
+        throw new Error("2地点が離れすぎています。より近い2地点を指定してください。");
+      }
+
+      const bounds = GeoUtils.calculateBounds(generationCenter.lat, generationCenter.lng, generationTerrain.width, generationTerrain.height);
+      const data = await providerRef.current.fetchMapData(bounds, generationTerrain.zoom, true, ({ loaded, total }) => {
         setLoadingText(`標高タイルを取得しています... ${loaded}/${total}`);
         setStatusMessage(`地形を生成中です（${loaded}/${total} タイル）。`);
       });
 
       const nextMeshInfo = viewer.update(data, {
-        centerLat: center.lat,
-        centerLng: center.lng,
-        widthKm: terrain.width,
-        heightKm: terrain.height,
-        zoom: terrain.zoom,
+        centerLat: generationCenter.lat,
+        centerLng: generationCenter.lng,
+        widthKm: generationTerrain.width,
+        heightKm: generationTerrain.height,
+        zoom: generationTerrain.zoom,
         useTexture: true
       });
 
       setMeshInfo(nextMeshInfo);
+      setTerrain(generationTerrain);
       setHasGeneratedMesh(true);
       setShowOptionalFinishing(false);
       setSelectedViewpoint(null);
@@ -448,15 +724,27 @@ export function App() {
       setPhase(AppPhase.GENERATED);
 
       const missingCount = data?.diagnostics?.demMissingCount ?? 0;
-      if (missingCount > 0) {
+      const invalidHeightCount = data?.diagnostics?.invalidHeightCount ?? 0;
+      if (missingCount > 0 || invalidHeightCount > 0) {
         const sample = data?.diagnostics?.demMissingSamples?.[0];
         const fallbackHint =
-          terrain.zoom > 12 ? "Zoomを12に下げるか範囲を狭めると改善しやすくなります。" : "範囲を狭めるか別地点で再生成してください。";
-        setStatusMessage(`一部DEMタイルが欠損したため補完表示しています。`);
-        setDetailOverride(`警告: DEM欠損 ${missingCount} 枚 / 例: ${sample || "取得URLなし"} / 次: ${fallbackHint}`);
+          generationTerrain.zoom > 12 ? "Zoomを12に下げるか範囲を狭めると改善しやすくなります。" : "範囲を狭めるか別地点で再生成してください。";
+        setStatusMessage("DEMの欠損または無効値を補完して表示しています。");
+        setDetailOverride(
+          `警告: DEM欠損 ${missingCount} 枚 / 無効標高 ${invalidHeightCount} 点 / 例: ${sample || "取得URLなし"} / 次: ${fallbackHint}`
+        );
       } else {
-        setStatusMessage("地形を生成しました。先に3Dモデルを保存してください。");
+        if (useTwoPointMode && secondaryPoint && twoPointDistanceKm !== null) {
+          setStatusMessage(
+            `2地点（${center.label} - ${secondaryPoint.label} / 約${twoPointDistanceKm.toFixed(1)}km）を含む地形を生成しました。先に3Dモデルを保存してください。`
+          );
+        } else {
+          setStatusMessage("地形を生成しました。先に3Dモデルを保存してください。");
+        }
         setDetailOverride("現在の価値: 地形を制作へ持ち出せます。次章の価値: 今後は比較・共有にも接続予定です。");
+        if (twoPointNotice) {
+          setDetailOverride(`補足: ${twoPointNotice} / 現在の価値: 地形を制作へ持ち出せます。次章の価値: 今後は比較・共有にも接続予定です。`);
+        }
       }
     } catch (error: unknown) {
       const message = getErrorMessage(error);
@@ -526,7 +814,7 @@ export function App() {
   }
 
   async function regenerateTerrain() {
-    if (!hasSelectedLocation || busy) return;
+    if (!hasRequiredLocation || busy) return;
     setPhase(AppPhase.READY_TO_GENERATE);
     setStatusMessage("現在の条件で再生成します。");
     await generateTerrain();
@@ -535,9 +823,9 @@ export function App() {
   function recoverFromError() {
     clearErrorState();
 
-    if (!hasSelectedLocation) {
+    if (!hasRequiredLocation) {
       setPhase(AppPhase.IDLE);
-      setStatusMessage("地点を選択し直して再開してください。");
+      setStatusMessage(useTwoPointMode ? "開始地点と終点を確認して再開してください。" : "地点を選択し直して再開してください。");
       setDetailOverride(null);
       return;
     }
@@ -595,6 +883,8 @@ export function App() {
     if (phase === AppPhase.IDLE) {
       if (!hasSelectedLocation) {
         selectRecommendedLocationFromPrimary();
+      } else if (useTwoPointMode && !secondaryPoint) {
+        setStatusMessage("2地点モードです。終点を検索して指定してください。");
       } else {
         setPhase(AppPhase.READY_TO_GENERATE);
         setStatusMessage("地点が選択済みです。生成へ進めます。");
@@ -672,6 +962,30 @@ export function App() {
             <h2 className="c-step__title">ステップ1: 地点を決める</h2>
             <p className="c-step__description">ギャラリー選択か地点検索で中心を確定します。</p>
 
+            <div className="c-mode-switch" data-component="GenerationModeSwitch">
+              <div className="c-mode-switch__tabs">
+                <button
+                  className={`c-mode-switch__tab ${generationMode === "single-point" ? "is-active" : ""}`}
+                  data-action="set-single-point-mode"
+                  onClick={() => onGenerationModeChange("single-point")}
+                  type="button"
+                >
+                  1地点モード
+                </button>
+                <button
+                  className={`c-mode-switch__tab ${generationMode === "two-points" ? "is-active" : ""}`}
+                  data-action="set-two-point-mode"
+                  onClick={() => onGenerationModeChange("two-points")}
+                  type="button"
+                >
+                  2地点モード（任意）
+                </button>
+              </div>
+              <p className="c-inline-note">
+                2地点モードでは開始地点と終点を含む範囲を自動計算して生成します。例: 富士山周辺 と 横浜駅周辺
+              </p>
+            </div>
+
             <div className="c-gallery" data-component="GalleryStrip">
               {FEATURED_LOCATIONS.map((location) => (
                 <button
@@ -716,35 +1030,106 @@ export function App() {
                 </button>
               </div>
             </div>
+
+            {useTwoPointMode ? (
+              <div className="c-search" data-component="SecondaryLocationSearch">
+                <label className="c-search__label" htmlFor="secondary-location-search-input">
+                  終点を検索する（2点目）
+                </label>
+                <div className="c-search__controls">
+                  <input
+                    className="c-input"
+                    data-component="SecondarySearchQuery"
+                    id="secondary-location-search-input"
+                    onChange={(event) => setSecondarySearchQuery(event.target.value)}
+                    onKeyDown={onSecondarySearchKeyDown}
+                    placeholder="例: 横浜駅, 渋谷駅, 箱根湯本駅"
+                    value={secondarySearchQuery}
+                  />
+                  <button
+                    className="c-button c-button--secondary"
+                    data-action="search-secondary-location"
+                    disabled={busy || phase === AppPhase.SEARCHING || phase === AppPhase.GENERATING || !hasSelectedLocation}
+                    onClick={() => void searchSecondaryLocation()}
+                    type="button"
+                  >
+                    終点検索
+                  </button>
+                </div>
+                <p className="c-inline-note">
+                  {secondaryPoint
+                    ? `終点: ${secondaryPoint.label}（${secondaryPoint.lat.toFixed(4)}, ${secondaryPoint.lng.toFixed(4)}）`
+                    : "終点が未指定です。先に開始地点を決めてから終点を設定してください。"}
+                </p>
+              </div>
+            ) : null}
           </section>
 
           <section className="c-panel c-step" data-component="GenerationStepSection" data-journey="primary" data-step="2">
             <h2 className="c-step__title">ステップ2: 条件を決めて地形を生成する</h2>
-            <p className="c-step__description">範囲プリセットを選択し、生成条件を確認します。</p>
+            <p className="c-step__description">
+              {useTwoPointMode ? "2地点を必ず含む範囲を自動計算します。ワイド/標準/詳細は使用しません。" : "範囲プリセットを選択し、生成条件を確認します。"}
+            </p>
 
-            <div className="c-preset-grid" data-component="PresetButtons">
-              {Object.entries(PRESETS).map(([key, preset]) => (
-                <button
-                  className={`c-preset-button ${activePreset === key ? "is-active" : ""}`.trim()}
-                  data-action="apply-preset"
-                  disabled={busy || !hasSelectedLocation}
-                  key={key}
-                  onClick={() => applyPreset(key as PresetKey)}
-                  type="button"
-                >
-                  <span>{preset.label}</span>
-                </button>
-              ))}
-            </div>
+            {!useTwoPointMode ? (
+              <div className="c-preset-grid" data-component="PresetButtons">
+                {Object.entries(PRESETS).map(([key, preset]) => (
+                  <button
+                    className={`c-preset-button ${activePreset === key ? "is-active" : ""}`.trim()}
+                    data-action="apply-preset"
+                    disabled={busy || !hasSelectedLocation}
+                    key={key}
+                    onClick={() => applyPreset(key as PresetKey)}
+                    type="button"
+                  >
+                    <span>{preset.label}</span>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="c-summary-card" data-component="TwoPointAutoRangeNote">
+                <p>2地点モードでは、開始地点と終点が必ず範囲内に入るように自動で範囲を計算します。</p>
+                <p>距離が長い場合は、全体を収めるために Zoom を自動調整します。</p>
+                <div className="c-chip-group" data-component="TwoPointMarginPreset">
+                  {Object.entries(TWO_POINT_MARGIN_PRESETS).map(([key, preset]) => (
+                    <button
+                      className={`c-chip ${twoPointMarginPreset === key ? "is-active" : ""}`.trim()}
+                      data-action="set-two-point-margin-preset"
+                      key={key}
+                      onClick={() => onTwoPointMarginPresetChange(key as TwoPointMarginPreset)}
+                      type="button"
+                    >
+                      {preset.label} {preset.scale.toFixed(2)}x
+                    </button>
+                  ))}
+                </div>
+                <p className="c-inline-note">余白倍率: {selectedTwoPointMargin.helper}</p>
+              </div>
+            )}
 
             {!hasSelectedLocation ? <p className="c-warning">先に地点を選択してください。地点確定後に生成できます。</p> : null}
+            {useTwoPointMode && !secondaryPoint ? <p className="c-warning">2地点モードの終点が未設定です。終点検索で指定してください。</p> : null}
+            {useTwoPointMode && twoPointPlanPreview && !twoPointPlanPreview.valid ? (
+              <p className="c-warning">{twoPointPlanPreview.notice || "2地点の距離が広すぎるため生成できません。"}</p>
+            ) : null}
 
             <div className="c-summary-card" data-component="GenerationSummary">
-              <p>中心: {center.label}</p>
-              <p>範囲: {terrain.width.toFixed(1)} x {terrain.height.toFixed(1)} km</p>
-              <p>細かさ: Zoom {terrain.zoom}（{getZoomLabel(terrain.zoom)}）</p>
-              <p>プリセット: {presetLabel}</p>
+              {useTwoPointMode && secondaryPoint ? (
+                <>
+                  <p>開始: {center.label}</p>
+                  <p>終点: {secondaryPoint.label}</p>
+                  <p>距離: 約{twoPointPlanPreview?.distanceKm.toFixed(1)} km</p>
+                  <p>中心（自動）: {summaryCenter.label}</p>
+                </>
+              ) : (
+                <p>中心: {center.label}</p>
+              )}
+              <p>範囲: {summaryTerrain.width.toFixed(1)} x {summaryTerrain.height.toFixed(1)} km</p>
+              <p>細かさ: Zoom {summaryTerrain.zoom}（{useTwoPointMode ? "自動調整" : getZoomLabel(summaryTerrain.zoom)}）</p>
+              <p>{useTwoPointMode ? "範囲モード: 2地点自動包含" : `プリセット: ${presetLabel}`}</p>
+              {useTwoPointMode ? <p>余白倍率: {selectedTwoPointMargin.label}（{selectedTwoPointMargin.scale.toFixed(2)}x）</p> : null}
               <p>推定タイル数: {estimatedTiles} / 上限: {MAX_TILE_COUNT}</p>
+              {useTwoPointMode && twoPointPlanPreview?.notice ? <p>補足: {twoPointPlanPreview.notice}</p> : null}
             </div>
           </section>
 
@@ -855,7 +1240,15 @@ export function App() {
             >
               {primaryActionLabel}
             </button>
-            {phase === AppPhase.IDLE ? <p className="c-dock-hint">主CTAでおすすめ地点を自動選択します。地点はあとで変更できます。</p> : null}
+            {phase === AppPhase.IDLE ? (
+              <p className="c-dock-hint">
+                {useTwoPointMode
+                  ? hasSelectedLocation
+                    ? "2地点モードです。終点を指定すると主CTAで生成へ進めます。"
+                    : "主CTAで開始地点を自動選択し、次に終点を指定できます。"
+                  : "主CTAでおすすめ地点を自動選択します。地点はあとで変更できます。"}
+              </p>
+            ) : null}
             {hasGeneratedMesh ? (
               <button className="c-button c-button--secondary" data-action="regenerate-terrain" disabled={busy} onClick={() => void regenerateTerrain()} type="button">
                 地形を再生成
@@ -887,7 +1280,15 @@ export function App() {
           >
             {primaryActionLabel}
           </button>
-          {phase === AppPhase.IDLE ? <p className="c-dock-hint">主CTAでおすすめ地点を自動選択します。</p> : null}
+          {phase === AppPhase.IDLE ? (
+            <p className="c-dock-hint">
+              {useTwoPointMode
+                ? hasSelectedLocation
+                  ? "終点を指定すると生成できます。"
+                  : "主CTAで開始地点を自動選択できます。"
+                : "主CTAでおすすめ地点を自動選択します。"}
+            </p>
+          ) : null}
           {hasGeneratedMesh ? (
             <button
               className="c-button c-button--secondary"

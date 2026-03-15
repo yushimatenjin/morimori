@@ -228,6 +228,32 @@ button:disabled {
   gap: 0.35rem;
 }
 
+.c-mode-switch {
+  display: grid;
+  gap: 0.38rem;
+}
+
+.c-mode-switch__tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.4rem;
+}
+
+.c-mode-switch__tab {
+  border-radius: 0.66rem;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  background: rgba(15, 23, 42, 0.58);
+  padding: 0.45rem 0.55rem;
+  font-size: 0.74rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.c-mode-switch__tab.is-active {
+  border-color: var(--state-accent);
+  background: var(--state-tint);
+}
+
 .c-search__label {
   font-size: 0.76rem;
   font-weight: 600;
@@ -290,6 +316,27 @@ button:disabled {
   font-size: 0.76rem;
   color: var(--cloud-text);
   background: rgba(2, 6, 23, 0.58);
+}
+
+.c-chip-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.25rem;
+}
+
+.c-chip {
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.34);
+  background: rgba(15, 23, 42, 0.66);
+  padding: 0.26rem 0.58rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.c-chip.is-active {
+  border-color: var(--state-accent);
+  background: var(--state-tint);
 }
 
 .c-inline-note {
@@ -578,6 +625,10 @@ button:disabled {
   }
 
   .c-preset-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .c-mode-switch__tabs {
     grid-template-columns: 1fr;
   }
 
