@@ -13,7 +13,6 @@ export class TerrainViewer {
     this.container = container;
 
     this.scene = new THREE.Scene();
-    this.scene.fog = new THREE.Fog(0x06111c, 4000, 320000);
 
     this.camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 1500000);
     this.camera.position.set(3200, 1800, 3200);
