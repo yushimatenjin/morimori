@@ -11,45 +11,45 @@ export const AppPhase = {
 export const phaseViewModel = {
   [AppPhase.SPLASH]: {
     pill: "開始前",
-    title: "開始前です",
-    detail: "先に地形を生成し、GLB を保存してから配置検証へ進みます。",
+    title: "背景地形の制作を始めます",
+    detail: "探す→作る→持ち出すの順で、制作完了まで最短で進めます。",
     action: "制作を始める"
   },
   [AppPhase.IDLE]: {
-    pill: "入力待ち",
-    title: "地点の設定を待機しています",
-    detail: "地点を設定し、地形生成の条件を決めてください。",
-    action: "地点を検索"
+    pill: "探す",
+    title: "地点を決めてください",
+    detail: "ギャラリーか検索で中心地点を選ぶと、生成準備に進みます。",
+    action: "地点を選ぶ/検索する"
   },
   [AppPhase.SEARCHING]: {
     pill: "検索中",
-    title: "候補地点を検索しています",
-    detail: "キーワードに一致する地点を取得しています。",
-    action: "検索中..."
+    title: "地点を検索しています",
+    detail: "キーワードに一致する候補を取得しています。完了までお待ちください。",
+    action: "検索中（非活性）"
   },
   [AppPhase.READY_TO_GENERATE]: {
-    pill: "生成準備完了",
+    pill: "作る",
     title: "地形を生成できます",
-    detail: "条件を確認しました。地形生成を開始できます。",
+    detail: "条件を確認できたら地形を生成してください。",
     action: "この条件で地形を生成"
   },
   [AppPhase.GENERATING]: {
     pill: "生成中",
     title: "広域地形を生成しています",
-    detail: "数十秒から数分かかる場合があります。",
-    action: "生成中..."
+    detail: "進捗を表示しています。数十秒から数分かかる場合があります。",
+    action: "生成中（非活性）"
   },
   [AppPhase.GENERATED]: {
-    pill: "生成済み",
+    pill: "持ち出す",
     title: "地形を生成しました",
-    detail: "3Dモデルを保存し、必要なら配置・視点検証へ進んでください。",
-    action: "別条件で再生成"
+    detail: "まず3Dモデルを保存してください。保存後に必要な場合のみ視点調整へ進みます。",
+    action: "3Dモデルを保存"
   },
   [AppPhase.ERROR]: {
     pill: "エラー",
-    title: "生成に失敗しました",
+    title: "処理に失敗しました",
     detail: "原因を確認し、条件を見直して再試行してください。",
-    action: "再試行する"
+    action: "条件を見直して再試行"
   }
 };
 
